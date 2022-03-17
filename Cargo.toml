@@ -1,0 +1,15 @@
+[package]
+name = "teamspeak-autochannel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+clap = "3.1"
+telnet = "0.2.1"
+serde = "1.0"
+toml = "0.5"
+env_logger = "0.9"
+log = "0.4"
+tokio = { version = "1", features = ["full"] }
+serde_derive = "1.0"
