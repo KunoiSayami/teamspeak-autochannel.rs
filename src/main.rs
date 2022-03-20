@@ -1,7 +1,6 @@
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{error, warn};
-use std::borrow::Borrow;
 use std::time::Duration;
 use telnet::Event;
 
@@ -55,7 +54,7 @@ struct TelnetConn {
 }
 
 impl TelnetConn {
-    fn decode_result(data: Box<[u8]>) -> anyhow::Result<Option<bool>> {
+    fn decode_result(data: Box<[u8]>) -> anyhow::Result<Option<QueryStatus>> {
         let content =
             String::from_utf8(data.to_vec()).map_err(|e| anyhow!("Got FromUtf8Error: {:?}", e))?;
 
@@ -72,7 +71,7 @@ impl TelnetConn {
                     ));
                 }
 
-                return Ok(Some(status.is_ok()));
+                return Ok(Some(status));
             }
         }
         Ok(None)
@@ -120,18 +119,39 @@ impl TelnetConn {
         Ok(())
     }
 
-    fn login(&mut self, user: &str, password: &str) -> anyhow::Result<bool> {
-        let payload = format!("login {} {}\n", user, password);
+    fn write_and_read(&mut self, payload: &str, timeout: u64) -> anyhow::Result<Box<[u8]>> {
         self.write_data(&payload)?;
-        let data = self
-            .read_data(2)?
-            .ok_or_else(|| anyhow!("Return data is None"))?;
+        Ok(self
+            .read_data(timeout)?
+            .ok_or_else(|| anyhow!("Return data is None"))?)
+    }
+
+    fn login(&mut self, user: &str, password: &str) -> anyhow::Result<QueryStatus> {
+        let payload = format!("login {} {}\n\r", user, password);
+        let data = self.write_and_read(payload.as_str(), 2)?;
+        Ok(Self::decode_result(data)?.ok_or_else(|| anyhow!("Can't find status line."))?)
+    }
+
+    fn select_server(&mut self, server_id: i32) -> anyhow::Result<QueryStatus> {
+        let payload = format!("use {}\n\r", server_id);
+        let data = self.write_and_read(payload.as_str(), 2)?;
         Ok(Self::decode_result(data)?.ok_or_else(|| anyhow!("Can't find status line."))?)
     }
 }
 
-fn staff(server: &str, port: u16, user: &str, password: &str) -> anyhow::Result<()> {
+fn staff(server: &str, port: u16, user: &str, password: &str, sid: &str) -> anyhow::Result<()> {
     let mut conn = TelnetConn::connect(server, port)?;
+    let status = conn.login(user, password)?;
+    if !status.is_ok() {
+        return Err(anyhow!("Login failed. {:?}", status));
+    }
+    let status = conn.select_server(
+        sid.parse()
+            .map_err(|e| anyhow!("Got error while parse sid: {:?}", e))?,
+    )?;
+    if !status.is_ok() {
+        return Err(anyhow!("Select server id failed: {:?}", status));
+    }
     Ok(())
 }
 
@@ -143,6 +163,7 @@ fn main() -> anyhow::Result<()> {
             arg!(--port [PORT] "Teamspeak ServerQuery server port"),
             arg!(<USER> "Teamspeak ServerQuery user"),
             arg!(<PASSWORD> "Teamspeak ServerQuery password"),
+            arg!(--sid [SID] "Teamspeak ServerQuery server id"),
         ])
         .get_matches();
     env_logger::Builder::from_default_env().init();
@@ -158,6 +179,24 @@ fn main() -> anyhow::Result<()> {
             }),
         matches.value_of("USER").unwrap(),
         matches.value_of("PASSWORD").unwrap(),
+        matches.value_of("SID").unwrap_or("0"),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_connection() {
+        let mut conn = TelnetConn::connect(env!("QUERY_HOST"), 10011).unwrap();
+
+        let result = conn.login("serveradmin", env!("QUERY_PASSWORD")).unwrap();
+
+        assert!(result.is_ok());
+
+        let result = conn.select_server(0).unwrap();
+        assert!(result.is_ok())
+    }
 }
