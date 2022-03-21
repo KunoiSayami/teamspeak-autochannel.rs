@@ -1,17 +1,16 @@
 mod datastructures;
 
-use crate::datastructures::channel::Channel;
-use crate::datastructures::client::Client;
+use crate::datastructures::{Channel, Client, CreateChannel};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{error, warn};
-use serde::Deserialize;
 use std::time::Duration;
 use telnet::Event;
 
 struct TelnetConn {
     conn: telnet::Telnet,
+    pid: i64,
 }
 
 impl TelnetConn {
@@ -43,6 +42,8 @@ impl TelnetConn {
     ) -> anyhow::Result<(Option<QueryStatus>, Option<Vec<T>>)> {
         let (status, content) = Self::decode_status(data)?;
 
+        println!("{}", content);
+
         for line in content.lines() {
             if !line.starts_with("error ") {
                 let mut v = Vec::new();
@@ -55,10 +56,13 @@ impl TelnetConn {
         Ok((status, None))
     }
 
-    fn connect(server: &str, port: u16) -> anyhow::Result<Self> {
+    fn connect(server: &str, port: u16, target_id: i64) -> anyhow::Result<Self> {
         let conn = telnet::Telnet::connect((server, port), 512)
             .map_err(|e| anyhow!("Got error while connect to {}:{} {:?}", server, port, e))?;
-        let mut self_ = Self { conn };
+        let mut self_ = Self {
+            conn,
+            pid: target_id,
+        };
 
         let content = self_
             .read_data(1)
@@ -86,6 +90,7 @@ impl TelnetConn {
     }
 
     fn write_data(&mut self, payload: &str) -> anyhow::Result<()> {
+        debug_assert!(payload.ends_with("\n\r"));
         self.conn
             .write(payload.as_bytes())
             .map(|size| {
@@ -99,50 +104,94 @@ impl TelnetConn {
 
     fn write_and_read(&mut self, payload: &str, timeout: u64) -> anyhow::Result<Box<[u8]>> {
         self.write_data(payload)?;
-        self
-            .read_data(timeout)?
+        self.read_data(timeout)?
             .ok_or_else(|| anyhow!("Return data is None"))
     }
 
-    fn login(&mut self, user: &str, password: &str) -> anyhow::Result<QueryStatus> {
-        let payload = format!("login {} {}\n\r", user, password);
-        let data = self.write_and_read(payload.as_str(), 2)?;
+    fn basic_operation(&mut self, payload: &str) -> anyhow::Result<QueryStatus> {
+        let data = self.write_and_read(payload, 2)?;
         Self::decode_status(data)?
             .0
             .ok_or_else(|| anyhow!("Can't find status line."))
     }
 
-    fn select_server(&mut self, server_id: i32) -> anyhow::Result<QueryStatus> {
-        let payload = format!("use {}\n\r", server_id);
-        let data = self.write_and_read(payload.as_str(), 2)?;
-        Self::decode_status(data)?
-            .0
-            .ok_or_else(|| anyhow!("Can't find status line."))
-    }
-
-    fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
-        let data = self.write_and_read("clientlist -uid\n\r", 2)?;
+    fn query_option<T: FromQueryString + Sized>(
+        &mut self,
+        payload: &str,
+    ) -> anyhow::Result<(QueryStatus, Vec<T>)> {
+        let data = self.write_and_read(payload, 2)?;
         let (status, clients) = Self::decode_status_with_result(data)?;
-
         Ok((
             status.ok_or_else(|| anyhow!("Can't find status line."))?,
             clients.ok_or_else(|| anyhow!("Can't find result line."))?,
         ))
     }
 
-    fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)> {
-        let data = self.write_and_read("channellist\n\r", 2)?;
-        let (status, channels) = Self::decode_status_with_result(data)?;
+    fn login(&mut self, user: &str, password: &str) -> anyhow::Result<QueryStatus> {
+        let payload = format!("login {} {}\n\r", user, password);
+        self.basic_operation(payload.as_str())
+    }
 
-        Ok((
-            status.ok_or_else(|| anyhow!("Can't find status line."))?,
-            channels.ok_or_else(|| anyhow!("Can't find result line."))?,
-        ))
+    fn select_server(&mut self, server_id: i32) -> anyhow::Result<QueryStatus> {
+        let payload = format!("use {}\n\r", server_id);
+        self.basic_operation(payload.as_str())
+    }
+
+    fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
+        self.query_option("clientlist -uid\n\r")
+    }
+
+    fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)> {
+        self.query_option("channellist\n\r")
+    }
+
+    fn set_client_channel_group(
+        &mut self,
+        clid: i64,
+        group_id: i64,
+    ) -> anyhow::Result<QueryStatus> {
+        todo!()
+    }
+
+    fn create_channel(&mut self, name: &str) -> anyhow::Result<(QueryStatus, CreateChannel)> {
+        let payload = format!(
+            "channelcreate channel_name={name} pid={pid}\n\r",
+            name = name,
+            pid = self.pid
+        );
+        let (status, mut ret) = self.query_option(payload.as_str())?;
+        Ok((status, ret.remove(0)))
+    }
+
+    fn move_client_to_channel(
+        &mut self,
+        clid: i64,
+        target_channel: i64,
+    ) -> anyhow::Result<QueryStatus> {
+        let payload = format!(
+            "clientmove clid={clid} cid={cid}\n\r",
+            clid = clid,
+            cid = target_channel
+        );
+        self.basic_operation(payload.as_str())
     }
 }
 
-fn staff(server: &str, port: u16, user: &str, password: &str, sid: &str) -> anyhow::Result<()> {
-    let mut conn = TelnetConn::connect(server, port)?;
+fn staff(
+    server: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    sid: &str,
+    channel_id: &str,
+) -> anyhow::Result<()> {
+    let mut conn = TelnetConn::connect(
+        server,
+        port,
+        channel_id
+            .parse()
+            .map_err(|e| anyhow!("Got parse error while parse channel_id: {:?}", e))?,
+    )?;
     let status = conn.login(user, password)?;
     if !status.is_ok() {
         return Err(anyhow!("Login failed. {:?}", status));
@@ -166,6 +215,8 @@ fn main() -> anyhow::Result<()> {
             arg!(<USER> "Teamspeak ServerQuery user"),
             arg!(<PASSWORD> "Teamspeak ServerQuery password"),
             arg!(--sid [SID] "Teamspeak ServerQuery server id"),
+            arg!(<CHANNEL_ID> "Teamspeak server target channel id"),
+            arg!(<PRIVILEGE_GROUP> "Target channel privilege group id"),
         ])
         .get_matches();
     env_logger::Builder::from_default_env().init();
@@ -182,6 +233,7 @@ fn main() -> anyhow::Result<()> {
         matches.value_of("USER").unwrap(),
         matches.value_of("PASSWORD").unwrap(),
         matches.value_of("SID").unwrap_or("1"),
+        matches.value_of("CHANNEL_ID").unwrap(),
     )?;
     Ok(())
 }
@@ -190,9 +242,17 @@ fn main() -> anyhow::Result<()> {
 mod test {
     use super::*;
 
+    fn get_current_timestamp() -> u64 {
+        let start = std::time::SystemTime::now();
+        let since_the_epoch = start
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards");
+        since_the_epoch.as_secs()
+    }
+
     #[test]
     fn test_connection() {
-        let mut conn = TelnetConn::connect(env!("QUERY_HOST"), 10011).unwrap();
+        let mut conn = TelnetConn::connect(env!("QUERY_HOST"), 10011, 5).unwrap();
 
         let result = conn.login("serveradmin", env!("QUERY_PASSWORD")).unwrap();
 
@@ -208,5 +268,10 @@ mod test {
         let (status, channel) = conn.query_channels().unwrap();
         assert!(status.is_ok());
         dbg!(channel);
+
+        let name = format!("test{}", get_current_timestamp());
+        let (status, create_channel) = conn.create_channel(name.as_str()).unwrap();
+        assert!(status.is_ok());
+        dbg!(create_channel);
     }
 }

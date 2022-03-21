@@ -1,7 +1,29 @@
 pub trait FromQueryString: for<'de> Deserialize<'de> {
     fn from_query(data: &str) -> anyhow::Result<Self>
     where
-        Self: Sized;
+        Self: Sized,
+    {
+        serde_teamspeak_querystring::from_str(data)
+            .map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))
+    }
+}
+
+pub mod create_channel {
+    use crate::FromQueryString;
+    use serde_derive::Deserialize;
+
+    #[derive(Clone, Debug, Default, Deserialize)]
+    pub struct CreateChannel {
+        cid: i64,
+    }
+
+    impl CreateChannel {
+        pub fn cid(&self) -> i64 {
+            self.cid
+        }
+    }
+
+    impl FromQueryString for CreateChannel {}
 }
 
 pub mod channel {
@@ -39,20 +61,11 @@ pub mod channel {
         }
     }
 
-    impl FromQueryString for Channel {
-        fn from_query(data: &str) -> anyhow::Result<Self>
-        where
-            Self: Sized,
-        {
-            serde_teamspeak_querystring::from_str(data)
-                .map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))
-        }
-    }
+    impl FromQueryString for Channel {}
 }
 
 pub mod client {
     use crate::datastructures::FromQueryString;
-    use anyhow::anyhow;
     use serde_derive::Deserialize;
 
     #[derive(Clone, Debug, Default, Deserialize)]
@@ -86,15 +99,7 @@ pub mod client {
         }
     }
 
-    impl FromQueryString for Client {
-        fn from_query(data: &str) -> anyhow::Result<Self>
-        where
-            Self: Sized,
-        {
-            serde_teamspeak_querystring::from_str(data)
-                .map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))
-        }
-    }
+    impl FromQueryString for Client {}
 
     #[cfg(test)]
     mod test {
@@ -165,5 +170,8 @@ pub mod query_status {
     }
 }
 
+pub use channel::Channel;
+pub use client::Client;
+pub use create_channel::CreateChannel;
 pub use query_status::QueryStatus;
 use serde::Deserialize;
