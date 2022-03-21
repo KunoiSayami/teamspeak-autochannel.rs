@@ -1,67 +1,28 @@
+mod datastructures;
+
+use crate::datastructures::channel::Channel;
+use crate::datastructures::client::Client;
+use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{error, warn};
+use serde::Deserialize;
 use std::time::Duration;
 use telnet::Event;
-
-#[derive(Clone, Debug)]
-struct QueryStatus {
-    id: i32,
-    msg: String,
-}
-
-impl QueryStatus {
-    pub fn new(id: i32, msg: String) -> Self {
-        Self { id, msg }
-    }
-
-    pub fn id(&self) -> i32 {
-        self.id
-    }
-    pub fn msg(&self) -> &str {
-        &self.msg
-    }
-
-    pub fn is_ok(&self) -> bool {
-        self.id == 0
-    }
-}
-
-impl TryFrom<&str> for QueryStatus {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let (_, line) = value
-            .split_once("error ")
-            .ok_or_else(|| anyhow!("Split error: {}", value))?;
-        let (id, msg) = line
-            .split_once(' ')
-            .ok_or_else(|| anyhow!("Split error: {}", line))?;
-        debug_assert!(id.contains('='));
-        debug_assert!(msg.contains('='));
-        let (_, id) = id.split_once('=').unwrap();
-        let (_, msg) = msg.split_once('=').unwrap();
-        Ok(Self::new(
-            id.parse()
-                .map_err(|e| anyhow!("Got parse error: {:?}", e))?,
-            msg.to_string(),
-        ))
-    }
-}
 
 struct TelnetConn {
     conn: telnet::Telnet,
 }
 
 impl TelnetConn {
-    fn decode_result(data: Box<[u8]>) -> anyhow::Result<Option<QueryStatus>> {
+    fn decode_status(data: Box<[u8]>) -> anyhow::Result<(Option<QueryStatus>, String)> {
         let content =
             String::from_utf8(data.to_vec()).map_err(|e| anyhow!("Got FromUtf8Error: {:?}", e))?;
 
         debug_assert!(content.contains("error id="));
 
         for line in content.lines() {
-            if line.starts_with("error ") {
+            if line.trim().starts_with("error ") {
                 let status = QueryStatus::try_from(line)?;
                 if !status.is_ok() {
                     return Err(anyhow!(
@@ -71,10 +32,28 @@ impl TelnetConn {
                     ));
                 }
 
-                return Ok(Some(status));
+                return Ok((Some(status), content));
             }
         }
-        Ok(None)
+        Ok((None, content))
+    }
+
+    fn decode_status_with_result<T: FromQueryString + Sized>(
+        data: Box<[u8]>,
+        //builder: Box<dyn Fn(&str) -> anyhow::Result<T>>,
+    ) -> anyhow::Result<(Option<QueryStatus>, Option<Vec<T>>)> {
+        let (status, content) = Self::decode_status(data)?;
+
+        for line in content.lines() {
+            if !line.starts_with("error ") {
+                let mut v = Vec::new();
+                for element in line.split('|') {
+                    v.push(T::from_query(element)?);
+                }
+                return Ok((status, Some(v)));
+            }
+        }
+        Ok((status, None))
     }
 
     fn connect(server: &str, port: u16) -> anyhow::Result<Self> {
@@ -129,13 +108,37 @@ impl TelnetConn {
     fn login(&mut self, user: &str, password: &str) -> anyhow::Result<QueryStatus> {
         let payload = format!("login {} {}\n\r", user, password);
         let data = self.write_and_read(payload.as_str(), 2)?;
-        Ok(Self::decode_result(data)?.ok_or_else(|| anyhow!("Can't find status line."))?)
+        Ok(Self::decode_status(data)?
+            .0
+            .ok_or_else(|| anyhow!("Can't find status line."))?)
     }
 
     fn select_server(&mut self, server_id: i32) -> anyhow::Result<QueryStatus> {
         let payload = format!("use {}\n\r", server_id);
         let data = self.write_and_read(payload.as_str(), 2)?;
-        Ok(Self::decode_result(data)?.ok_or_else(|| anyhow!("Can't find status line."))?)
+        Ok(Self::decode_status(data)?
+            .0
+            .ok_or_else(|| anyhow!("Can't find status line."))?)
+    }
+
+    fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
+        let data = self.write_and_read("clientlist -uid\n\r", 2)?;
+        let (status, clients) = Self::decode_status_with_result(data)?;
+
+        Ok((
+            status.ok_or_else(|| anyhow!("Can't find status line."))?,
+            clients.ok_or_else(|| anyhow!("Can't find result line."))?,
+        ))
+    }
+
+    fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)> {
+        let data = self.write_and_read("channellist\n\r", 2)?;
+        let (status, channels) = Self::decode_status_with_result(data)?;
+
+        Ok((
+            status.ok_or_else(|| anyhow!("Can't find status line."))?,
+            channels.ok_or_else(|| anyhow!("Can't find result line."))?,
+        ))
     }
 }
 
@@ -179,7 +182,7 @@ fn main() -> anyhow::Result<()> {
             }),
         matches.value_of("USER").unwrap(),
         matches.value_of("PASSWORD").unwrap(),
-        matches.value_of("SID").unwrap_or("0"),
+        matches.value_of("SID").unwrap_or("1"),
     )?;
     Ok(())
 }
@@ -196,7 +199,15 @@ mod test {
 
         assert!(result.is_ok());
 
-        let result = conn.select_server(0).unwrap();
-        assert!(result.is_ok())
+        let result = conn.select_server(1).unwrap();
+        assert!(result.is_ok());
+
+        let (status, clients) = conn.query_clients().unwrap();
+        assert!(status.is_ok());
+        dbg!(clients);
+
+        let (status, channel) = conn.query_channels().unwrap();
+        assert!(status.is_ok());
+        dbg!(channel);
     }
 }
