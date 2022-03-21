@@ -38,7 +38,7 @@ impl TelnetConn {
         Ok((None, content))
     }
 
-    fn decode_status_with_result<'de, T: FromQueryString<'de> + Sized>(
+    fn decode_status_with_result<T: FromQueryString + Sized>(
         data: Box<[u8]>,
     ) -> anyhow::Result<(Option<QueryStatus>, Option<Vec<T>>)> {
         let (status, content) = Self::decode_status(data)?;

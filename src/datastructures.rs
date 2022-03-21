@@ -1,4 +1,4 @@
-pub trait FromQueryString<'de> : Deserialize<'de> {
+pub trait FromQueryString: for<'de> Deserialize<'de> {
     fn from_query(data: &str) -> anyhow::Result<Self>
     where
         Self: Sized;
@@ -39,7 +39,7 @@ pub mod channel {
         }
     }
 
-    impl FromQueryString<'_> for Channel {
+    impl FromQueryString for Channel {
         fn from_query(data: &str) -> anyhow::Result<Self>
         where
             Self: Sized,
@@ -86,7 +86,7 @@ pub mod client {
         }
     }
 
-    impl FromQueryString<'_> for Client {
+    impl FromQueryString for Client {
         fn from_query(data: &str) -> anyhow::Result<Self>
         where
             Self: Sized,
