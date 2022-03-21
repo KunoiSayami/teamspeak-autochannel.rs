@@ -38,9 +38,8 @@ impl TelnetConn {
         Ok((None, content))
     }
 
-    fn decode_status_with_result<T: FromQueryString + Sized>(
+    fn decode_status_with_result<'de, T: FromQueryString<'de> + Sized>(
         data: Box<[u8]>,
-        //builder: Box<dyn Fn(&str) -> anyhow::Result<T>>,
     ) -> anyhow::Result<(Option<QueryStatus>, Option<Vec<T>>)> {
         let (status, content) = Self::decode_status(data)?;
 
@@ -99,26 +98,26 @@ impl TelnetConn {
     }
 
     fn write_and_read(&mut self, payload: &str, timeout: u64) -> anyhow::Result<Box<[u8]>> {
-        self.write_data(&payload)?;
-        Ok(self
+        self.write_data(payload)?;
+        self
             .read_data(timeout)?
-            .ok_or_else(|| anyhow!("Return data is None"))?)
+            .ok_or_else(|| anyhow!("Return data is None"))
     }
 
     fn login(&mut self, user: &str, password: &str) -> anyhow::Result<QueryStatus> {
         let payload = format!("login {} {}\n\r", user, password);
         let data = self.write_and_read(payload.as_str(), 2)?;
-        Ok(Self::decode_status(data)?
+        Self::decode_status(data)?
             .0
-            .ok_or_else(|| anyhow!("Can't find status line."))?)
+            .ok_or_else(|| anyhow!("Can't find status line."))
     }
 
     fn select_server(&mut self, server_id: i32) -> anyhow::Result<QueryStatus> {
         let payload = format!("use {}\n\r", server_id);
         let data = self.write_and_read(payload.as_str(), 2)?;
-        Ok(Self::decode_status(data)?
+        Self::decode_status(data)?
             .0
-            .ok_or_else(|| anyhow!("Can't find status line."))?)
+            .ok_or_else(|| anyhow!("Can't find status line."))
     }
 
     fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
