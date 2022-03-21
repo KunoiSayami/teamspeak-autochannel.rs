@@ -1,4 +1,4 @@
-pub trait FromQueryString {
+pub trait FromQueryString<'de> : Deserialize<'de> {
     fn from_query(data: &str) -> anyhow::Result<Self>
     where
         Self: Sized;
@@ -39,13 +39,13 @@ pub mod channel {
         }
     }
 
-    impl FromQueryString for Channel {
+    impl FromQueryString<'_> for Channel {
         fn from_query(data: &str) -> anyhow::Result<Self>
         where
             Self: Sized,
         {
-            Ok(serde_teamspeak_querystring::from_str(data)
-                .map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))?)
+            serde_teamspeak_querystring::from_str(data)
+                .map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))
         }
     }
 }
@@ -86,13 +86,13 @@ pub mod client {
         }
     }
 
-    impl FromQueryString for Client {
+    impl FromQueryString<'_> for Client {
         fn from_query(data: &str) -> anyhow::Result<Self>
         where
             Self: Sized,
         {
-            Ok(serde_teamspeak_querystring::from_str(data)
-                .map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))?)
+            serde_teamspeak_querystring::from_str(data)
+                .map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))
         }
     }
 
@@ -159,7 +159,7 @@ pub mod query_status {
             Ok(Self::new(
                 id.parse()
                     .map_err(|e| anyhow!("Got parse error: {:?}", e))?,
-                msg.replace("\\s", " ").to_string(),
+                msg.replace("\\s", " "),
             ))
         }
     }
