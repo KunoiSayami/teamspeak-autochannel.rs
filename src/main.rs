@@ -1,10 +1,11 @@
 mod datastructures;
 
-use crate::datastructures::{Channel, Client, CreateChannel};
+use crate::datastructures::{Channel, Client, CreateChannel, WhoAmI};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use clap::{arg, Command};
-use log::{error, warn};
+use log::{error, info, warn};
+use std::collections::HashMap;
 use std::time::Duration;
 use telnet::Event;
 
@@ -57,7 +58,7 @@ impl TelnetConn {
     }
 
     fn connect(server: &str, port: u16, target_id: i64) -> anyhow::Result<Self> {
-        let conn = telnet::Telnet::connect((server, port), 512)
+        let conn = telnet::Telnet::connect((server, port), 65536)
             .map_err(|e| anyhow!("Got error while connect to {}:{} {:?}", server, port, e))?;
         let mut self_ = Self {
             conn,
@@ -153,10 +154,18 @@ impl TelnetConn {
         todo!()
     }
 
+    fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)> {
+        let (status, mut ret) = self.query_option("whoami\n\r")?;
+        Ok((status, ret.remove(0)))
+    }
+
     fn create_channel(&mut self, name: &str) -> anyhow::Result<(QueryStatus, CreateChannel)> {
         let payload = format!(
-            "channelcreate channel_name={name} pid={pid}\n\r",
-            name = name,
+            "channelcreate channel_name={name} cpid={pid} channel_codec_quality=6\n\r",
+            name = name
+                .replace(' ', "\\s")
+                .replace('\\', "\\\\")
+                .replace('/', "\\/"),
             pid = self.pid
         );
         let (status, mut ret) = self.query_option(payload.as_str())?;
@@ -185,13 +194,10 @@ fn staff(
     sid: &str,
     channel_id: &str,
 ) -> anyhow::Result<()> {
-    let mut conn = TelnetConn::connect(
-        server,
-        port,
-        channel_id
-            .parse()
-            .map_err(|e| anyhow!("Got parse error while parse channel_id: {:?}", e))?,
-    )?;
+    let channel_id = channel_id
+        .parse()
+        .map_err(|e| anyhow!("Got parse error while parse channel_id: {:?}", e))?;
+    let mut conn = TelnetConn::connect(server, port, channel_id)?;
     let status = conn.login(user, password)?;
     if !status.is_ok() {
         return Err(anyhow!("Login failed. {:?}", status));
@@ -203,8 +209,72 @@ fn staff(
     if !status.is_ok() {
         return Err(anyhow!("Select server id failed: {:?}", status));
     }
-    Ok(())
+
+    let (status, who_am_i) = conn.who_am_i()?;
+
+    if !status.is_ok() {
+        return Err(anyhow!("Whoami failed: {:?}", status));
+    }
+
+    let clid = who_am_i.clid();
+
+    let mut mapper: HashMap<i64, i64> = HashMap::new();
+
+    loop {
+        std::thread::sleep(Duration::from_millis(1));
+        let (status, clients) = conn.query_clients()?;
+
+        if !status.is_ok() {
+            error!("Got error while query clients: {:?}", status);
+            continue;
+        }
+
+        for client in clients {
+            if client.channel_id() != channel_id || client.client_id() == clid {
+                continue;
+            }
+
+            let ret = mapper.get(&client.client_database_id());
+            let create_new = ret.is_none();
+            let target_channel = if create_new {
+                let name = format!("{}'s channel", client.client_nickname());
+                let (status, create_channel) = match conn.create_channel(&name) {
+                    Ok(ret) => ret,
+                    Err(e) => {
+                        error!("Got error while create channel: {:?}", e);
+                        continue;
+                    }
+                };
+                // error id=771
+
+                if !status.is_ok() {
+                    error!("Got error while create {:?} channel: {:?}", name, status);
+                    continue;
+                }
+                create_channel.cid()
+            } else {
+                *ret.unwrap()
+            };
+
+            let status = match conn.move_client_to_channel(client.client_id(), target_channel) {
+                Ok(ret) => ret,
+                Err(e) => {
+                    error!("Got error while move client: {:?}", e);
+                    continue;
+                }
+            };
+
+            if create_new {
+                conn.move_client_to_channel(clid, channel_id).unwrap();
+                mapper.insert(client.client_database_id(), target_channel);
+            }
+
+            info!("Move {} to {}", client.client_nickname(), target_channel);
+        }
+    }
 }
+
+async fn handler() {}
 
 fn main() -> anyhow::Result<()> {
     let matches = Command::new(env!("CARGO_PKG_NAME"))
@@ -221,9 +291,9 @@ fn main() -> anyhow::Result<()> {
         .get_matches();
     env_logger::Builder::from_default_env().init();
     staff(
-        matches.value_of("SERVER").unwrap_or("localhost"),
+        matches.value_of("server").unwrap_or("localhost"),
         matches
-            .value_of("PORT")
+            .value_of("port")
             .unwrap_or("10011")
             .parse()
             .unwrap_or_else(|e| {
@@ -232,7 +302,7 @@ fn main() -> anyhow::Result<()> {
             }),
         matches.value_of("USER").unwrap(),
         matches.value_of("PASSWORD").unwrap(),
-        matches.value_of("SID").unwrap_or("1"),
+        matches.value_of("sid").unwrap_or("1"),
         matches.value_of("CHANNEL_ID").unwrap(),
     )?;
     Ok(())

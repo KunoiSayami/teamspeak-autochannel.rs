@@ -8,6 +8,24 @@ pub trait FromQueryString: for<'de> Deserialize<'de> {
     }
 }
 
+pub mod whoami {
+    use crate::FromQueryString;
+    use serde_derive::Deserialize;
+
+    #[derive(Clone, Debug, Default, Deserialize)]
+    pub struct WhoAmI {
+        client_id: i64,
+    }
+
+    impl WhoAmI {
+        pub fn clid(&self) -> i64 {
+            self.client_id
+        }
+    }
+
+    impl FromQueryString for WhoAmI {}
+}
+
 pub mod create_channel {
     use crate::FromQueryString;
     use serde_derive::Deserialize;
@@ -79,10 +97,10 @@ pub mod client {
     }
 
     impl Client {
-        pub fn clid(&self) -> i64 {
+        pub fn client_id(&self) -> i64 {
             self.clid
         }
-        pub fn cid(&self) -> i64 {
+        pub fn channel_id(&self) -> i64 {
             self.cid
         }
         pub fn client_database_id(&self) -> i64 {
@@ -111,8 +129,8 @@ pub mod client {
         #[test]
         fn test() {
             let result = Client::from_query(TEST_STRING).unwrap();
-            assert_eq!(result.clid(), 8);
-            assert_eq!(result.cid(), 1);
+            assert_eq!(result.client_id(), 8);
+            assert_eq!(result.channel_id(), 1);
             assert_eq!(result.client_database_id(), 1);
             assert_eq!(result.client_nickname(), "serveradmin".to_string());
             assert_eq!(result.client_type(), 1);
@@ -123,8 +141,9 @@ pub mod client {
 
 pub mod query_status {
     use anyhow::anyhow;
+    use serde_derive::Deserialize;
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Deserialize)]
     pub struct QueryStatus {
         id: i32,
         msg: String,
@@ -154,18 +173,8 @@ pub mod query_status {
             let (_, line) = value
                 .split_once("error ")
                 .ok_or_else(|| anyhow!("Split error: {}", value))?;
-            let (id, msg) = line
-                .split_once(' ')
-                .ok_or_else(|| anyhow!("Split error: {}", line))?;
-            debug_assert!(id.contains('='));
-            debug_assert!(msg.contains('='));
-            let (_, id) = id.split_once('=').unwrap();
-            let (_, msg) = msg.split_once('=').unwrap();
-            Ok(Self::new(
-                id.parse()
-                    .map_err(|e| anyhow!("Got parse error: {:?}", e))?,
-                msg.replace("\\s", " "),
-            ))
+            serde_teamspeak_querystring::from_str(line)
+                .map_err(|e| anyhow!("Got error while parse string: {:?} {:?}", line, e))
         }
     }
 }
@@ -175,3 +184,4 @@ pub use client::Client;
 pub use create_channel::CreateChannel;
 pub use query_status::QueryStatus;
 use serde::Deserialize;
+pub use whoami::WhoAmI;
