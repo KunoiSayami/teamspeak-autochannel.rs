@@ -270,6 +270,7 @@ fn staff(
             error!("Got error while parse interval from env: {:?}", e);
             1
         });
+    info!("Connected: {}", clid);
 
     loop {
         std::thread::sleep(Duration::from_millis(interval));
@@ -281,7 +282,10 @@ fn staff(
         }
 
         'outer: for client in clients {
-            if client.channel_id() != channel_id || client.client_id() == clid {
+            if client.channel_id() != channel_id
+                || client.client_database_id() == clid
+                || client.client_type() == 1
+            {
                 continue;
             }
             let key = format!("ts_autochannel_{}", client.client_database_id());

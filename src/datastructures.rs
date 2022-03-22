@@ -14,12 +14,12 @@ pub mod whoami {
 
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct WhoAmI {
-        client_id: i64,
+        client_database_id: i64,
     }
 
     impl WhoAmI {
         pub fn clid(&self) -> i64 {
-            self.client_id
+            self.client_database_id
         }
     }
 
