@@ -24,13 +24,13 @@ impl TelnetConn {
         for line in content.lines() {
             if line.trim().starts_with("error ") {
                 let status = QueryStatus::try_from(line)?;
-                if !status.is_ok() {
+                /*if !status.is_ok() {
                     return Err(anyhow!(
                         "Got non ok status: id={} msg={}",
                         status.id(),
                         status.msg()
                     ));
-                }
+                }*/
 
                 return Ok((Some(status), content));
             }
@@ -43,7 +43,11 @@ impl TelnetConn {
     ) -> anyhow::Result<(Option<QueryStatus>, Option<Vec<T>>)> {
         let (status, content) = Self::decode_status(data)?;
 
-        println!("{}", content);
+        if let Some(ref q_status) = status {
+            if !q_status.is_ok() {
+                return Ok((status, None));
+            }
+        }
 
         for line in content.lines() {
             if !line.starts_with("error ") {
@@ -116,16 +120,31 @@ impl TelnetConn {
             .ok_or_else(|| anyhow!("Can't find status line."))
     }
 
-    fn query_option<T: FromQueryString + Sized>(
+    fn query_option_non_error<T: FromQueryString + Sized>(
         &mut self,
         payload: &str,
     ) -> anyhow::Result<(QueryStatus, Vec<T>)> {
         let data = self.write_and_read(payload, 2)?;
-        let (status, clients) = Self::decode_status_with_result(data)?;
+        let (status, ret) = Self::decode_status_with_result(data)?;
         Ok((
             status.ok_or_else(|| anyhow!("Can't find status line."))?,
-            clients.ok_or_else(|| anyhow!("Can't find result line."))?,
+            ret.ok_or_else(|| anyhow!("Can't find result line."))?,
         ))
+    }
+
+    fn query_option<T: FromQueryString + Sized>(
+        &mut self,
+        payload: &str,
+    ) -> anyhow::Result<(QueryStatus, Option<Vec<T>>)> {
+        let data = self.write_and_read(payload, 2)?;
+        let (status, ret) = Self::decode_status_with_result(data)?;
+        let status = status.ok_or_else(|| anyhow!("Can't find status line."))?;
+        let ret = if status.is_ok() {
+            Some(ret.ok_or_else(|| anyhow!("Can't find result line."))?)
+        } else {
+            ret
+        };
+        Ok((status, ret))
     }
 
     fn login(&mut self, user: &str, password: &str) -> anyhow::Result<QueryStatus> {
@@ -139,11 +158,11 @@ impl TelnetConn {
     }
 
     fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
-        self.query_option("clientlist -uid\n\r")
+        self.query_option_non_error("clientlist -uid\n\r")
     }
 
     fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)> {
-        self.query_option("channellist\n\r")
+        self.query_option_non_error("channellist\n\r")
     }
 
     fn set_client_channel_group(
@@ -155,21 +174,29 @@ impl TelnetConn {
     }
 
     fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)> {
-        let (status, mut ret) = self.query_option("whoami\n\r")?;
+        let (status, mut ret) = self.query_option_non_error("whoami\n\r")?;
         Ok((status, ret.remove(0)))
     }
 
-    fn create_channel(&mut self, name: &str) -> anyhow::Result<(QueryStatus, CreateChannel)> {
+    fn create_channel(
+        &mut self,
+        name: &str,
+    ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)> {
         let payload = format!(
             "channelcreate channel_name={name} cpid={pid} channel_codec_quality=6\n\r",
             name = name
-                .replace(' ', "\\s")
                 .replace('\\', "\\\\")
+                .replace(' ', "\\s")
                 .replace('/', "\\/"),
             pid = self.pid
         );
         let (status, mut ret) = self.query_option(payload.as_str())?;
-        Ok((status, ret.remove(0)))
+        let ret = if let Some(mut ret) = ret {
+            Some(ret.remove(0))
+        } else {
+            None
+        };
+        Ok((status, ret))
     }
 
     fn move_client_to_channel(
@@ -221,7 +248,11 @@ fn staff(
     let mut mapper: HashMap<i64, i64> = HashMap::new();
 
     loop {
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(if cfg!(debug_assertions) {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_millis(1)
+        });
         let (status, clients) = conn.query_clients()?;
 
         if !status.is_ok() {
@@ -229,7 +260,7 @@ fn staff(
             continue;
         }
 
-        for client in clients {
+        'outer: for client in clients {
             if client.channel_id() != channel_id || client.client_id() == clid {
                 continue;
             }
@@ -237,21 +268,28 @@ fn staff(
             let ret = mapper.get(&client.client_database_id());
             let create_new = ret.is_none();
             let target_channel = if create_new {
-                let name = format!("{}'s channel", client.client_nickname());
-                let (status, create_channel) = match conn.create_channel(&name) {
-                    Ok(ret) => ret,
-                    Err(e) => {
-                        error!("Got error while create channel: {:?}", e);
-                        continue;
-                    }
-                };
-                // error id=771
+                let mut name = format!("{}'s channel", client.client_nickname());
+                loop {
+                    let (status, create_channel) = match conn.create_channel(&name) {
+                        Ok(ret) => ret,
+                        Err(e) => {
+                            error!("Got error while create channel: {:?}", e);
+                            continue;
+                        }
+                    };
 
-                if !status.is_ok() {
-                    error!("Got error while create {:?} channel: {:?}", name, status);
-                    continue;
+                    if !status.is_ok() {
+                        if status.id() == 771 {
+                            //let (original, _) = name.rsplit_once("'s").unwrap();
+                            name = format!("{}1", name);
+                            continue;
+                        }
+                        error!("Got error while create {:?} channel: {:?}", name, status);
+                        continue 'outer;
+                    }
+
+                    break create_channel.unwrap().cid();
                 }
-                create_channel.cid()
             } else {
                 *ret.unwrap()
             };
