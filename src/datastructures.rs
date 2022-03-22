@@ -14,12 +14,16 @@ pub mod whoami {
 
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct WhoAmI {
+        client_id: i64,
         client_database_id: i64,
     }
 
     impl WhoAmI {
-        pub fn clid(&self) -> i64 {
+        pub fn cldbid(&self) -> i64 {
             self.client_database_id
+        }
+        pub fn clid(&self) -> i64 {
+            self.client_id
         }
     }
 
@@ -147,6 +151,7 @@ pub mod query_status {
     use anyhow::anyhow;
     use serde_derive::Deserialize;
 
+    #[allow(dead_code)]
     #[derive(Clone, Debug, Deserialize)]
     pub struct QueryStatus {
         id: i32,
@@ -157,7 +162,7 @@ pub mod query_status {
         pub fn id(&self) -> i32 {
             self.id
         }
-        pub fn msg(&self) -> &str {
+        pub fn _msg(&self) -> &str {
             &self.msg
         }
 

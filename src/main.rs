@@ -261,7 +261,7 @@ fn staff(
         return Err(anyhow!("Whoami failed: {:?}", status));
     }
 
-    let clid = who_am_i.clid();
+    let clid = who_am_i.cldbid();
 
     let interval = option_env!("INTERVAL")
         .unwrap_or("1")
@@ -283,7 +283,7 @@ fn staff(
 
         'outer: for client in clients {
             if client.channel_id() != channel_id
-                || client.client_database_id() == clid
+                || client.client_database_id() == who_am_i.cldbid()
                 || client.client_type() == 1
             {
                 continue;
@@ -337,11 +337,16 @@ fn staff(
             };
 
             if !status.is_ok() {
-                error!("Got error while move client: {}", status.msg())
+                if status.id() == 768 {
+                    redis_conn.del(&key)?;
+                    continue;
+                }
+                error!("Got error while move client: {:?}", status)
             }
 
             if create_new {
-                conn.move_client_to_channel(clid, channel_id).unwrap();
+                conn.move_client_to_channel(who_am_i.clid(), channel_id)
+                    .unwrap();
                 //mapper.insert(client.client_database_id(), target_channel);
                 redis_conn.set(&key, target_channel)?;
             }
