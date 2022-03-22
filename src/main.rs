@@ -161,16 +161,24 @@ impl TelnetConn {
         self.query_option_non_error("clientlist -uid\n\r")
     }
 
+    #[allow(dead_code)]
     fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)> {
         self.query_option_non_error("channellist\n\r")
     }
 
     fn set_client_channel_group(
         &mut self,
-        clid: i64,
+        cldbid: i64,
+        channel_id: i64,
         group_id: i64,
     ) -> anyhow::Result<QueryStatus> {
-        todo!()
+        let payload = format!(
+            "setclientchannelgroup cgid={group} cid={channel_id} cldbid={cldbid}\n\r",
+            group = group_id,
+            channel_id = channel_id,
+            cldbid = cldbid
+        );
+        self.basic_operation(&payload)
     }
 
     fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)> {
@@ -190,7 +198,7 @@ impl TelnetConn {
                 .replace('/', "\\/"),
             pid = self.pid
         );
-        let (status, mut ret) = self.query_option(payload.as_str())?;
+        let (status, ret) = self.query_option(payload.as_str())?;
         let ret = if let Some(mut ret) = ret {
             Some(ret.remove(0))
         } else {
@@ -220,10 +228,14 @@ fn staff(
     password: &str,
     sid: &str,
     channel_id: &str,
+    privilege_group: &str,
 ) -> anyhow::Result<()> {
     let channel_id = channel_id
         .parse()
         .map_err(|e| anyhow!("Got parse error while parse channel_id: {:?}", e))?;
+    let privilege_group = privilege_group
+        .parse()
+        .map_err(|e| anyhow!("Got parse error while parse privilege_group: {:?}", e))?;
     let mut conn = TelnetConn::connect(server, port, channel_id)?;
     let status = conn.login(user, password)?;
     if !status.is_ok() {
@@ -247,12 +259,16 @@ fn staff(
 
     let mut mapper: HashMap<i64, i64> = HashMap::new();
 
-    loop {
-        std::thread::sleep(if cfg!(debug_assertions) {
-            Duration::from_secs(1)
-        } else {
-            Duration::from_millis(1)
+    let interval = option_env!("INTERVAL")
+        .unwrap_or("1")
+        .parse()
+        .unwrap_or_else(|e| {
+            error!("Got error while parse interval from env: {:?}", e);
+            1
         });
+
+    loop {
+        std::thread::sleep(Duration::from_millis(interval));
         let (status, clients) = conn.query_clients()?;
 
         if !status.is_ok() {
@@ -269,7 +285,7 @@ fn staff(
             let create_new = ret.is_none();
             let target_channel = if create_new {
                 let mut name = format!("{}'s channel", client.client_nickname());
-                loop {
+                let channel_id = loop {
                     let (status, create_channel) = match conn.create_channel(&name) {
                         Ok(ret) => ret,
                         Err(e) => {
@@ -289,7 +305,15 @@ fn staff(
                     }
 
                     break create_channel.unwrap().cid();
-                }
+                };
+                conn.set_client_channel_group(
+                    client.client_database_id(),
+                    channel_id,
+                    privilege_group,
+                )
+                .map_err(|e| error!("Got error while set client channel group: {:?}", e))
+                .ok();
+                channel_id
             } else {
                 *ret.unwrap()
             };
@@ -302,6 +326,10 @@ fn staff(
                 }
             };
 
+            if !status.is_ok() {
+                error!("Got error while move client: {}", status.msg())
+            }
+
             if create_new {
                 conn.move_client_to_channel(clid, channel_id).unwrap();
                 mapper.insert(client.client_database_id(), target_channel);
@@ -311,8 +339,6 @@ fn staff(
         }
     }
 }
-
-async fn handler() {}
 
 fn main() -> anyhow::Result<()> {
     let matches = Command::new(env!("CARGO_PKG_NAME"))
@@ -342,6 +368,7 @@ fn main() -> anyhow::Result<()> {
         matches.value_of("PASSWORD").unwrap(),
         matches.value_of("sid").unwrap_or("1"),
         matches.value_of("CHANNEL_ID").unwrap(),
+        matches.value_of("PRIVILEGE_GROUP").unwrap(),
     )?;
     Ok(())
 }

@@ -48,6 +48,7 @@ pub mod channel {
     use crate::FromQueryString;
     use serde_derive::Deserialize;
 
+    #[allow(dead_code)]
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct Channel {
         cid: i64,
@@ -58,6 +59,7 @@ pub mod channel {
         channel_needed_subscribe_power: i64,
     }
 
+    #[allow(dead_code)]
     impl Channel {
         pub fn cid(&self) -> i64 {
             self.cid
@@ -86,6 +88,7 @@ pub mod client {
     use crate::datastructures::FromQueryString;
     use serde_derive::Deserialize;
 
+    #[allow(dead_code)]
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct Client {
         clid: i64,
@@ -96,6 +99,7 @@ pub mod client {
         client_nickname: String,
     }
 
+    #[allow(dead_code)]
     impl Client {
         pub fn client_id(&self) -> i64 {
             self.clid
@@ -150,10 +154,6 @@ pub mod query_status {
     }
 
     impl QueryStatus {
-        pub fn new(id: i32, msg: String) -> Self {
-            Self { id, msg }
-        }
-
         pub fn id(&self) -> i32 {
             self.id
         }
