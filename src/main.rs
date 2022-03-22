@@ -5,7 +5,7 @@ use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{error, info, warn};
-use std::collections::HashMap;
+use redis::Commands;
 use std::time::Duration;
 use telnet::Event;
 
@@ -229,6 +229,7 @@ fn staff(
     sid: &str,
     channel_id: &str,
     privilege_group: &str,
+    redis_server: &str,
 ) -> anyhow::Result<()> {
     let channel_id = channel_id
         .parse()
@@ -236,7 +237,12 @@ fn staff(
     let privilege_group = privilege_group
         .parse()
         .map_err(|e| anyhow!("Got parse error while parse privilege_group: {:?}", e))?;
+    let redis = redis::Client::open(redis_server)
+        .map_err(|e| anyhow!("Connect redis server error! {:?}", e))?;
     let mut conn = TelnetConn::connect(server, port, channel_id)?;
+    let mut redis_conn = redis
+        .get_connection()
+        .map_err(|e| anyhow!("Get redis connection error: {:?}", e))?;
     let status = conn.login(user, password)?;
     if !status.is_ok() {
         return Err(anyhow!("Login failed. {:?}", status));
@@ -256,8 +262,6 @@ fn staff(
     }
 
     let clid = who_am_i.clid();
-
-    let mut mapper: HashMap<i64, i64> = HashMap::new();
 
     let interval = option_env!("INTERVAL")
         .unwrap_or("1")
@@ -280,8 +284,10 @@ fn staff(
             if client.channel_id() != channel_id || client.client_id() == clid {
                 continue;
             }
+            let key = format!("ts_autochannel_{}", client.client_database_id());
 
-            let ret = mapper.get(&client.client_database_id());
+            //let ret = mapper.get(&client.client_database_id());
+            let ret: Option<i64> = redis_conn.get(&key)?;
             let create_new = ret.is_none();
             let target_channel = if create_new {
                 let mut name = format!("{}'s channel", client.client_nickname());
@@ -315,7 +321,7 @@ fn staff(
                 .ok();
                 channel_id
             } else {
-                *ret.unwrap()
+                ret.unwrap()
             };
 
             let status = match conn.move_client_to_channel(client.client_id(), target_channel) {
@@ -332,7 +338,8 @@ fn staff(
 
             if create_new {
                 conn.move_client_to_channel(clid, channel_id).unwrap();
-                mapper.insert(client.client_database_id(), target_channel);
+                //mapper.insert(client.client_database_id(), target_channel);
+                redis_conn.set(&key, target_channel)?;
             }
 
             info!("Move {} to {}", client.client_nickname(), target_channel);
@@ -351,6 +358,7 @@ fn main() -> anyhow::Result<()> {
             arg!(--sid [SID] "Teamspeak ServerQuery server id"),
             arg!(<CHANNEL_ID> "Teamspeak server target channel id"),
             arg!(<PRIVILEGE_GROUP> "Target channel privilege group id"),
+            arg!(--redis [REDIS_SERVER] "Redis server address"),
         ])
         .get_matches();
     env_logger::Builder::from_default_env().init();
@@ -369,6 +377,7 @@ fn main() -> anyhow::Result<()> {
         matches.value_of("sid").unwrap_or("1"),
         matches.value_of("CHANNEL_ID").unwrap(),
         matches.value_of("PRIVILEGE_GROUP").unwrap(),
+        matches.value_of("redis").unwrap_or("redis://127.0.0.1"),
     )?;
     Ok(())
 }
