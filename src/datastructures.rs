@@ -169,6 +169,10 @@ pub mod query_status {
         pub fn is_ok(&self) -> bool {
             self.id == 0
         }
+
+        pub fn is_err(&self) -> bool {
+            self.id != 0
+        }
     }
 
     impl TryFrom<&str> for QueryStatus {

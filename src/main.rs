@@ -24,7 +24,7 @@ impl TelnetConn {
         for line in content.lines() {
             if line.trim().starts_with("error ") {
                 let status = QueryStatus::try_from(line)?;
-                /*if !status.is_ok() {
+                /*if status.is_err() {
                     return Err(anyhow!(
                         "Got non ok status: id={} msg={}",
                         status.id(),
@@ -192,10 +192,7 @@ impl TelnetConn {
     ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)> {
         let payload = format!(
             "channelcreate channel_name={name} cpid={pid} channel_codec_quality=6\n\r",
-            name = name
-                .replace('\\', "\\\\")
-                .replace(' ', "\\s")
-                .replace('/', "\\/"),
+            name = Self::escape(name),
             pid = self.pid
         );
         let (status, ret) = self.query_option(payload.as_str())?;
@@ -219,6 +216,21 @@ impl TelnetConn {
         );
         self.basic_operation(payload.as_str())
     }
+
+    fn send_text_message(&mut self, clid: i64, text: &str) -> anyhow::Result<QueryStatus> {
+        let payload = format!(
+            "sendtextmessage targetmode=1 target={clid} msg={text}\n\r",
+            clid = clid,
+            text = Self::escape(text)
+        );
+        self.basic_operation(&payload)
+    }
+
+    fn escape(s: &str) -> String {
+        s.replace('\\', "\\\\")
+            .replace(' ', "\\s")
+            .replace('/', "\\/")
+    }
 }
 
 fn staff(
@@ -230,6 +242,7 @@ fn staff(
     channel_id: &str,
     privilege_group: &str,
     redis_server: &str,
+    interval: &str,
 ) -> anyhow::Result<()> {
     let channel_id = channel_id
         .parse()
@@ -237,6 +250,11 @@ fn staff(
     let privilege_group = privilege_group
         .parse()
         .map_err(|e| anyhow!("Got parse error while parse privilege_group: {:?}", e))?;
+    let interval = interval.parse().unwrap_or_else(|e| {
+        error!("Got error while parse interval from env: {:?}", e);
+        1
+    });
+    info!("Interval is: {}", interval);
     let redis = redis::Client::open(redis_server)
         .map_err(|e| anyhow!("Connect redis server error! {:?}", e))?;
     let mut conn = TelnetConn::connect(server, port, channel_id)?;
@@ -244,39 +262,35 @@ fn staff(
         .get_connection()
         .map_err(|e| anyhow!("Get redis connection error: {:?}", e))?;
     let status = conn.login(user, password)?;
-    if !status.is_ok() {
+    if status.is_err() {
         return Err(anyhow!("Login failed. {:?}", status));
     }
     let status = conn.select_server(
         sid.parse()
             .map_err(|e| anyhow!("Got error while parse sid: {:?}", e))?,
     )?;
-    if !status.is_ok() {
+    if status.is_err() {
         return Err(anyhow!("Select server id failed: {:?}", status));
     }
 
     let (status, who_am_i) = conn.who_am_i()?;
 
-    if !status.is_ok() {
+    if status.is_err() {
         return Err(anyhow!("Whoami failed: {:?}", status));
     }
 
-    let clid = who_am_i.cldbid();
+    info!("Connected: {}", who_am_i.clid());
 
-    let interval = option_env!("INTERVAL")
-        .unwrap_or("1")
-        .parse()
-        .unwrap_or_else(|e| {
-            error!("Got error while parse interval from env: {:?}", e);
-            1
-        });
-    info!("Connected: {}", clid);
-
+    let mut skip_sleep = false;
     loop {
-        std::thread::sleep(Duration::from_millis(interval));
+        if !skip_sleep {
+            std::thread::sleep(Duration::from_millis(interval));
+        } else {
+            skip_sleep = false;
+        }
         let (status, clients) = conn.query_clients()?;
 
-        if !status.is_ok() {
+        if status.is_err() {
             error!("Got error while query clients: {:?}", status);
             continue;
         }
@@ -290,10 +304,12 @@ fn staff(
             }
             let key = format!("ts_autochannel_{}", client.client_database_id());
 
-            //let ret = mapper.get(&client.client_database_id());
             let ret: Option<i64> = redis_conn.get(&key)?;
             let create_new = ret.is_none();
             let target_channel = if create_new {
+                conn.send_text_message(client.client_id(), "I can't find you channel.")
+                    .map_err(|e| error!("Got error while send message: {:?}", e))
+                    .ok();
                 let mut name = format!("{}'s channel", client.client_nickname());
                 let channel_id = loop {
                     let (status, create_channel) = match conn.create_channel(&name) {
@@ -304,7 +320,7 @@ fn staff(
                         }
                     };
 
-                    if !status.is_ok() {
+                    if status.is_err() {
                         if status.id() == 771 {
                             //let (original, _) = name.rsplit_once("'s").unwrap();
                             name = format!("{}1", name);
@@ -313,6 +329,9 @@ fn staff(
                         error!("Got error while create {:?} channel: {:?}", name, status);
                         continue 'outer;
                     }
+                    conn.send_text_message(client.client_id(), "Your Channel has been created!")
+                        .map_err(|e| error!("Got error while send message: {:?}", e))
+                        .ok();
 
                     break create_channel.unwrap().cid();
                 };
@@ -336,13 +355,18 @@ fn staff(
                 }
             };
 
-            if !status.is_ok() {
+            if status.is_err() {
                 if status.id() == 768 {
                     redis_conn.del(&key)?;
+                    skip_sleep = true;
                     continue;
                 }
                 error!("Got error while move client: {:?}", status)
             }
+
+            conn.send_text_message(client.client_id(), "You have been moved into your channel")
+                .map_err(|e| error!("Got error while send message: {:?}", e))
+                .ok();
 
             if create_new {
                 conn.move_client_to_channel(who_am_i.clid(), channel_id)
@@ -368,6 +392,7 @@ fn main() -> anyhow::Result<()> {
             arg!(<CHANNEL_ID> "Teamspeak server target channel id"),
             arg!(<PRIVILEGE_GROUP> "Target channel privilege group id"),
             arg!(--redis [REDIS_SERVER] "Redis server address"),
+            arg!(--interval [INTERVAL] "Set server query interval"),
         ])
         .get_matches();
     env_logger::Builder::from_default_env().init();
@@ -387,6 +412,7 @@ fn main() -> anyhow::Result<()> {
         matches.value_of("CHANNEL_ID").unwrap(),
         matches.value_of("PRIVILEGE_GROUP").unwrap(),
         matches.value_of("redis").unwrap_or("redis://127.0.0.1"),
+        matches.value_of("interval").unwrap_or("5"),
     )?;
     Ok(())
 }
