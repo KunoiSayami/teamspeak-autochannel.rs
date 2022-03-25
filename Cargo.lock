@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "teamspeak-autochannel"
-version = "0.3.4"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap 3.1.6",
@@ -743,6 +743,7 @@ dependencies = [
  "serde-teamspeak-querystring",
  "serde_derive",
  "telnet",
+ "toml",
 ]
 
 [[package]]
@@ -799,6 +800,15 @@ name = "tinyvec_macros"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
+
+[[package]]
+name = "toml"
+version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a31142970826733df8241ef35dc040ef98c679ab14d7c3e54d827099b3acecaa"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "unicode-bidi"

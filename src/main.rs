@@ -1,11 +1,12 @@
 mod datastructures;
 
-use crate::datastructures::{Channel, Client, CreateChannel, WhoAmI};
+use crate::datastructures::{Channel, Client, Config, CreateChannel, WhoAmI};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{error, info, warn};
 use redis::Commands;
+use std::path::Path;
 use std::time::Duration;
 use telnet::Event;
 
@@ -89,7 +90,7 @@ impl TelnetConn {
             Event::Data(data) => Ok(Some(data)),
             Event::TimedOut => Ok(None),
             Event::NoData => Ok(None),
-            Event::Error(e) => Err(anyhow!("Got error: {:?}", e)),
+            Event::Error(e) => Err(anyhow!("Got error on read data: {:?}", e)),
             _ => Err(anyhow!("Got unknown error")),
         }
     }
@@ -152,7 +153,7 @@ impl TelnetConn {
         self.basic_operation(payload.as_str())
     }
 
-    fn select_server(&mut self, server_id: i32) -> anyhow::Result<QueryStatus> {
+    fn select_server(&mut self, server_id: i64) -> anyhow::Result<QueryStatus> {
         let payload = format!("use {}\n\r", server_id);
         self.basic_operation(payload.as_str())
     }
@@ -238,22 +239,12 @@ fn staff(
     port: u16,
     user: &str,
     password: &str,
-    sid: &str,
-    channel_id: &str,
-    privilege_group: &str,
-    redis_server: &str,
-    interval: &str,
+    sid: i64,
+    channel_id: i64,
+    privilege_group: i64,
+    redis_server: String,
+    interval: u64,
 ) -> anyhow::Result<()> {
-    let channel_id = channel_id
-        .parse()
-        .map_err(|e| anyhow!("Got parse error while parse channel_id: {:?}", e))?;
-    let privilege_group = privilege_group
-        .parse()
-        .map_err(|e| anyhow!("Got parse error while parse privilege_group: {:?}", e))?;
-    let interval = interval.parse().unwrap_or_else(|e| {
-        error!("Got error while parse interval from env: {:?}", e);
-        1
-    });
     info!("Interval is: {}", interval);
     let redis = redis::Client::open(redis_server)
         .map_err(|e| anyhow!("Connect redis server error! {:?}", e))?;
@@ -265,10 +256,7 @@ fn staff(
     if status.is_err() {
         return Err(anyhow!("Login failed. {:?}", status));
     }
-    let status = conn.select_server(
-        sid.parse()
-            .map_err(|e| anyhow!("Got error while parse sid: {:?}", e))?,
-    )?;
+    let status = conn.select_server(sid)?;
     if status.is_err() {
         return Err(anyhow!("Select server id failed: {:?}", status));
     }
@@ -380,10 +368,25 @@ fn staff(
     }
 }
 
+fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
+    let config = Config::try_from(path.as_ref())?;
+    staff(
+        &config.server().server(),
+        config.server().port(),
+        config.server().user(),
+        config.server().password(),
+        config.server().server_id(),
+        config.server().channel_id(),
+        config.server().privilege_group_id(),
+        config.server().redis_server(),
+        config.misc().interval(),
+    )
+}
+
 fn main() -> anyhow::Result<()> {
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
-        .args(&[
+        .subcommand(Command::new("run").args(&[
             arg!(--server [SERVER] "Teamspeak ServerQuery server address"),
             arg!(--port [PORT] "Teamspeak ServerQuery server port"),
             arg!(<USER> "Teamspeak ServerQuery user"),
@@ -393,27 +396,66 @@ fn main() -> anyhow::Result<()> {
             arg!(<PRIVILEGE_GROUP> "Target channel privilege group id"),
             arg!(--redis [REDIS_SERVER] "Redis server address"),
             arg!(--interval [INTERVAL] "Set server query interval"),
-        ])
+        ]))
+        .subcommand(
+            Command::new("service")
+                .arg(arg!([CONFIG_FILE] "Override default configure file location")),
+        )
         .get_matches();
     env_logger::Builder::from_default_env().init();
-    staff(
-        matches.value_of("server").unwrap_or("localhost"),
-        matches
-            .value_of("port")
-            .unwrap_or("10011")
-            .parse()
-            .unwrap_or_else(|e| {
-                warn!("Got parse error: {:?}", e);
-                10011
-            }),
-        matches.value_of("USER").unwrap(),
-        matches.value_of("PASSWORD").unwrap(),
-        matches.value_of("sid").unwrap_or("1"),
-        matches.value_of("CHANNEL_ID").unwrap(),
-        matches.value_of("PRIVILEGE_GROUP").unwrap(),
-        matches.value_of("redis").unwrap_or("redis://127.0.0.1"),
-        matches.value_of("interval").unwrap_or("5"),
-    )?;
+    match matches.subcommand() {
+        Some(("service", matches)) => {
+            configure_file_bootstrap(matches.value_of("CONFIG_FILE").unwrap_or("config.toml"))?;
+        }
+        Some(("run", matches)) => {
+            let channel_id = matches
+                .value_of("CHANNEL_ID")
+                .unwrap()
+                .parse()
+                .map_err(|e| anyhow!("Got parse error while parse channel_id: {:?}", e))?;
+            let privilege_group = matches
+                .value_of("PRIVILEGE_GROUP")
+                .unwrap()
+                .parse()
+                .map_err(|e| anyhow!("Got parse error while parse privilege_group: {:?}", e))?;
+            let interval = matches
+                .value_of("interval")
+                .unwrap_or("5")
+                .parse()
+                .unwrap_or_else(|e| {
+                    error!("Got error while parse interval from env: {:?}", e);
+                    1
+                });
+            let sid = matches
+                .value_of("sid")
+                .unwrap_or("1")
+                .parse()
+                .map_err(|e| anyhow!("Got error while parse sid: {:?}", e))?;
+            staff(
+                matches.value_of("server").unwrap_or("localhost"),
+                matches
+                    .value_of("port")
+                    .unwrap_or("10011")
+                    .parse()
+                    .unwrap_or_else(|e| {
+                        warn!("Got parse error: {:?}", e);
+                        10011
+                    }),
+                matches.value_of("USER").unwrap(),
+                matches.value_of("PASSWORD").unwrap(),
+                sid,
+                channel_id,
+                privilege_group,
+                matches
+                    .value_of("redis")
+                    .unwrap_or("redis://127.0.0.1")
+                    .to_string(),
+                interval,
+            )?;
+        }
+        _ => unreachable!(),
+    }
+
     Ok(())
 }
 

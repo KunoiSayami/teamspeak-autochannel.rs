@@ -188,8 +188,99 @@ pub mod query_status {
     }
 }
 
+pub mod config {
+    use anyhow::anyhow;
+    use serde_derive::Deserialize;
+    use std::fs::read_to_string;
+    use std::path::Path;
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Server {
+        server: Option<String>,
+        port: Option<u16>,
+        user: String,
+        password: String,
+        server_id: Option<i64>,
+        channel_id: i64,
+        privilege_group_id: i64,
+        redis_server: Option<String>,
+    }
+
+    impl Server {
+        pub fn server(&self) -> String {
+            if let Some(server) = &self.server {
+                server.clone()
+            } else {
+                String::from("127.0.0.1")
+            }
+        }
+        pub fn port(&self) -> u16 {
+            self.port.unwrap_or(10011)
+        }
+        pub fn user(&self) -> &str {
+            &self.user
+        }
+        pub fn password(&self) -> &str {
+            &self.password
+        }
+        pub fn server_id(&self) -> i64 {
+            self.server_id.unwrap_or(1)
+        }
+        pub fn channel_id(&self) -> i64 {
+            self.channel_id
+        }
+        pub fn privilege_group_id(&self) -> i64 {
+            self.privilege_group_id
+        }
+        pub fn redis_server(&self) -> String {
+            if let Some(server) = &self.redis_server {
+                server.clone()
+            } else {
+                String::from("redis://127.0.0.1")
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Misc {
+        interval: Option<u64>,
+    }
+
+    impl Misc {
+        pub fn interval(&self) -> u64 {
+            self.interval.unwrap_or(5)
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Config {
+        server: Server,
+        misc: Misc,
+    }
+
+    impl Config {
+        pub fn server(&self) -> &Server {
+            &self.server
+        }
+        pub fn misc(&self) -> &Misc {
+            &self.misc
+        }
+    }
+
+    impl TryFrom<&Path> for Config {
+        type Error = anyhow::Error;
+
+        fn try_from(path: &Path) -> Result<Self, Self::Error> {
+            let content = read_to_string(path).map_err(|e| anyhow!("Read error: {:?}", e))?;
+
+            toml::from_str(&content).map_err(|e| anyhow!("Deserialize toml error: {:?}", e))
+        }
+    }
+}
+
 pub use channel::Channel;
 pub use client::Client;
+pub use config::Config;
 pub use create_channel::CreateChannel;
 pub use query_status::QueryStatus;
 use serde::Deserialize;
