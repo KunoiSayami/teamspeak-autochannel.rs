@@ -80,7 +80,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build_aarch64:
-    name: Corss build
+    name: Cross build
     runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: full
