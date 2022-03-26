@@ -17,7 +17,7 @@ jobs:
       matrix:
         job:
           - os: macos-latest
-            binary_name: teamspeak-autochannel_linux_amd64
+            binary_name: teamspeak-autochannel_darwin_amd64
           - os: ubuntu-latest
             binary_name: teamspeak-autochannel_linux_amd64
           - os: windows-latest
@@ -53,11 +53,10 @@ jobs:
         env:
           BINARY_NAME: ${{ matrix.job.binary_name }}
         run: |
-          if [ "$RUNNER_OS" == "Linux" || "$RUNNER_OS" == "Darwin" ]; then
-            mv target/release/teamspeak-autochannel target/release/$BINARY_NAME
-          else
-            BIN='teamspeak-autochannel_windows_amd64.exe'
+          if [ "$RUNNER_OS" == "Windows" ]; then
             mv target/release/teamspeak-autochannel.exe target/release/$BINARY_NAME
+          else
+            mv target/release/teamspeak-autochannel target/release/$BINARY_NAME
           fi
           echo "::set-output name=bin::target/release/$BINARY_NAME"
       - uses: actions/upload-artifact@v2
