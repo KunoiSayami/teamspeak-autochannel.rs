@@ -51,15 +51,15 @@ jobs:
         id: rename
         shell: bash
         env:
-          BIN: ${{ matrix.job.binary_name }}
+          BINARY_NAME: ${{ matrix.job.binary_name }}
         run: |
           if [ "$RUNNER_OS" == "Linux" || "$RUNNER_OS" == "Darwin" ]; then
-            mv target/release/teamspeak-autochannel target/release/$BIN
+            mv target/release/teamspeak-autochannel target/release/$BINARY_NAME
           else
             BIN='teamspeak-autochannel_windows_amd64.exe'
-            mv target/release/teamspeak-autochannel.exe target/release/$BIN
+            mv target/release/teamspeak-autochannel.exe target/release/$BINARY_NAME
           fi
-          echo "::set-output name=bin::target/release/$BIN"
+          echo "::set-output name=bin::target/release/$BINARY_NAME"
       - uses: actions/upload-artifact@v2
         with:
           name: ${{ matrix.job.binary_name }}
