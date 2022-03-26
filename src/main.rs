@@ -25,13 +25,6 @@ impl TelnetConn {
         for line in content.lines() {
             if line.trim().starts_with("error ") {
                 let status = QueryStatus::try_from(line)?;
-                /*if status.is_err() {
-                    return Err(anyhow!(
-                        "Got non ok status: id={} msg={}",
-                        status.id(),
-                        status.msg()
-                    ));
-                }*/
 
                 return Ok((Some(status), content));
             }
@@ -397,16 +390,10 @@ fn main() -> anyhow::Result<()> {
             arg!(--redis [REDIS_SERVER] "Redis server address"),
             arg!(--interval [INTERVAL] "Set server query interval"),
         ]))
-        .subcommand(
-            Command::new("service")
-                .arg(arg!([CONFIG_FILE] "Override default configure file location")),
-        )
+        .arg(arg!([CONFIG_FILE] "Override default configure file location"))
         .get_matches();
     env_logger::Builder::from_default_env().init();
     match matches.subcommand() {
-        Some(("service", matches)) => {
-            configure_file_bootstrap(matches.value_of("CONFIG_FILE").unwrap_or("config.toml"))?;
-        }
         Some(("run", matches)) => {
             let channel_id = matches
                 .value_of("CHANNEL_ID")
@@ -453,7 +440,9 @@ fn main() -> anyhow::Result<()> {
                 interval,
             )?;
         }
-        _ => unreachable!(),
+        _ => {
+            configure_file_bootstrap(matches.value_of("CONFIG_FILE").unwrap_or("config.toml"))?;
+        }
     }
 
     Ok(())
