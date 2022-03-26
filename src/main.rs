@@ -239,23 +239,26 @@ fn staff(
     interval: u64,
 ) -> anyhow::Result<()> {
     info!("Interval is: {}", interval);
+
     let redis = redis::Client::open(redis_server)
         .map_err(|e| anyhow!("Connect redis server error! {:?}", e))?;
-    let mut conn = TelnetConn::connect(server, port, channel_id)?;
     let mut redis_conn = redis
         .get_connection()
         .map_err(|e| anyhow!("Get redis connection error: {:?}", e))?;
+
+    let mut conn = TelnetConn::connect(server, port, channel_id)?;
+
     let status = conn.login(user, password)?;
     if status.is_err() {
         return Err(anyhow!("Login failed. {:?}", status));
     }
+
     let status = conn.select_server(sid)?;
     if status.is_err() {
         return Err(anyhow!("Select server id failed: {:?}", status));
     }
 
     let (status, who_am_i) = conn.who_am_i()?;
-
     if status.is_err() {
         return Err(anyhow!("Whoami failed: {:?}", status));
     }
@@ -291,6 +294,7 @@ fn staff(
                 conn.send_text_message(client.client_id(), "I can't find you channel.")
                     .map_err(|e| error!("Got error while send message: {:?}", e))
                     .ok();
+
                 let mut name = format!("{}'s channel", client.client_nickname());
                 let channel_id = loop {
                     let (status, create_channel) = match conn.create_channel(&name) {
@@ -392,7 +396,9 @@ fn main() -> anyhow::Result<()> {
         ]))
         .arg(arg!([CONFIG_FILE] "Override default configure file location"))
         .get_matches();
+
     env_logger::Builder::from_default_env().init();
+
     match matches.subcommand() {
         Some(("run", matches)) => {
             let channel_id = matches
@@ -418,6 +424,7 @@ fn main() -> anyhow::Result<()> {
                 .unwrap_or("1")
                 .parse()
                 .map_err(|e| anyhow!("Got error while parse sid: {:?}", e))?;
+
             staff(
                 matches.value_of("server").unwrap_or("localhost"),
                 matches
@@ -465,7 +472,6 @@ mod test {
         let mut conn = TelnetConn::connect(env!("QUERY_HOST"), 10011, 5).unwrap();
 
         let result = conn.login("serveradmin", env!("QUERY_PASSWORD")).unwrap();
-
         assert!(result.is_ok());
 
         let result = conn.select_server(1).unwrap();
