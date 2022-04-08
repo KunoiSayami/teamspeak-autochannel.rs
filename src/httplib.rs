@@ -1,4 +1,6 @@
-use crate::datastructures::{Channel, Client, CreateChannel, FromJSON, QueryStatus, WhoAmI};
+use crate::datastructures::{
+    Channel, Client, CreateChannel, FromJSON, QueryStatus, WebQueryStatus, WhoAmI,
+};
 use crate::ApiMethods;
 use anyhow::anyhow;
 use log::debug;
@@ -8,7 +10,7 @@ use std::time::Duration;
 #[derive(Clone, Debug, Deserialize)]
 pub struct Response {
     body: Option<serde_json::Value>,
-    status: QueryStatus,
+    status: WebQueryStatus,
 }
 
 pub struct HttpConn {
@@ -61,7 +63,7 @@ impl HttpConn {
 
         let response: Response =
             serde_json::from_str(&response).map_err(|e| anyhow!("Got parser error: {:?}", e))?;
-        Ok(response.status)
+        Ok(response.status.to_status())
     }
 
     pub fn query_operation<T: FromJSON + Sized>(
@@ -94,7 +96,7 @@ impl HttpConn {
                 Some(response)
             }
         };
-        Ok((status, response))
+        Ok((status.to_status(), response))
     }
 
     pub fn query_operation_non_error<T: FromJSON + Sized>(

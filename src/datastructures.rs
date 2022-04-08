@@ -194,12 +194,31 @@ pub mod query_status {
     use anyhow::anyhow;
     use serde_derive::Deserialize;
 
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct WebQueryStatus {
+        code: i32,
+        message: String,
+    }
+
+    impl WebQueryStatus {
+        pub fn to_status(self) -> QueryStatus {
+            QueryStatus {
+                id: self.code,
+                msg: self.message,
+            }
+        }
+    }
+
+    impl From<WebQueryStatus> for QueryStatus {
+        fn from(status: WebQueryStatus) -> Self {
+            status.to_status()
+        }
+    }
+
     #[allow(dead_code)]
     #[derive(Clone, Debug, Deserialize)]
     pub struct QueryStatus {
-        #[serde(rename = "code")]
         id: i32,
-        #[serde(rename = "message")]
         msg: String,
     }
 
@@ -391,7 +410,7 @@ pub use channel::Channel;
 pub use client::Client;
 pub use config::Config;
 pub use create_channel::CreateChannel;
-pub use query_status::QueryStatus;
+pub use query_status::{QueryStatus, WebQueryStatus};
 use serde::Deserialize;
 use serde_json::Value;
 pub use whoami::WhoAmI;
