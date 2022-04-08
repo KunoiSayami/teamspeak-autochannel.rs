@@ -3,7 +3,7 @@ members = [".", "serde-teamspeak-querystring"]
 
 [package]
 name = "teamspeak-autochannel"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 
 [dependencies]
@@ -12,8 +12,10 @@ clap = "3.1"
 env_logger = "0.9"
 log = "0.4"
 redis = "0.21"
+reqwest = { version = "0.11.10", features = ["blocking", "json", "serde_json"] }
 serde = "1.0"
 serde-teamspeak-querystring = { path = "serde-teamspeak-querystring" }
 serde_derive = "1.0"
-telnet = "0.2.1"
+serde_json = "1.0.79"
+telnet = { version = "0.2.1" }
 toml = "0.5.8"

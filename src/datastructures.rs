@@ -8,13 +8,41 @@ pub trait FromQueryString: for<'de> Deserialize<'de> {
     }
 }
 
+pub trait FromJSON: for<'de> Deserialize<'de> {
+    fn from_json(data: &str) -> anyhow::Result<Self>
+    where
+        Self: Sized,
+    {
+        serde_json::from_str(data).map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))
+    }
+
+    fn from_value(value: Value) -> anyhow::Result<Self>
+    where
+        Self: Sized,
+    {
+        serde_json::from_value(value).map_err(|e| anyhow::anyhow!("Got parser error: {:?}", e))
+    }
+}
+
+fn from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    T::from_str(&s).map_err(serde::de::Error::custom)
+}
+
 pub mod whoami {
-    use crate::FromQueryString;
+    use super::{from_str, FromJSON, FromQueryString};
     use serde_derive::Deserialize;
 
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct WhoAmI {
+        #[serde(deserialize_with = "from_str")]
         client_id: i64,
+        #[serde(deserialize_with = "from_str")]
         client_database_id: i64,
     }
 
@@ -28,14 +56,16 @@ pub mod whoami {
     }
 
     impl FromQueryString for WhoAmI {}
+    impl FromJSON for WhoAmI {}
 }
 
 pub mod create_channel {
-    use crate::FromQueryString;
+    use super::{from_str, FromJSON, FromQueryString};
     use serde_derive::Deserialize;
 
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct CreateChannel {
+        #[serde(deserialize_with = "from_str")]
         cid: i64,
     }
 
@@ -46,20 +76,26 @@ pub mod create_channel {
     }
 
     impl FromQueryString for CreateChannel {}
+    impl FromJSON for CreateChannel {}
 }
 
 pub mod channel {
-    use crate::FromQueryString;
+    use super::{from_str, FromJSON, FromQueryString};
     use serde_derive::Deserialize;
 
     #[allow(dead_code)]
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct Channel {
+        #[serde(deserialize_with = "from_str")]
         cid: i64,
+        #[serde(deserialize_with = "from_str")]
         pid: i64,
+        #[serde(deserialize_with = "from_str")]
         channel_order: i64,
         channel_name: String,
+        #[serde(deserialize_with = "from_str")]
         total_clients: i64,
+        #[serde(deserialize_with = "from_str")]
         channel_needed_subscribe_power: i64,
     }
 
@@ -86,20 +122,26 @@ pub mod channel {
     }
 
     impl FromQueryString for Channel {}
+    impl FromJSON for Channel {}
 }
 
 pub mod client {
-    use crate::datastructures::FromQueryString;
+    use super::from_str;
+    use super::{FromJSON, FromQueryString};
     use serde_derive::Deserialize;
 
     #[allow(dead_code)]
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct Client {
+        #[serde(deserialize_with = "from_str")]
         clid: i64,
+        #[serde(deserialize_with = "from_str")]
         cid: i64,
+        #[serde(deserialize_with = "from_str")]
         client_database_id: i64,
+        #[serde(deserialize_with = "from_str")]
         client_type: i64,
-        client_unique_identifier: String,
+        //client_unique_identifier: String,
         client_nickname: String,
     }
 
@@ -117,8 +159,8 @@ pub mod client {
         pub fn client_type(&self) -> i64 {
             self.client_type
         }
-        pub fn client_unique_identifier(&self) -> &str {
-            &self.client_unique_identifier
+        pub fn client_unique_identifier(&self) -> String {
+            format!("{}", self.client_database_id)
         }
         pub fn client_nickname(&self) -> &str {
             &self.client_nickname
@@ -126,6 +168,7 @@ pub mod client {
     }
 
     impl FromQueryString for Client {}
+    impl FromJSON for Client {}
 
     #[cfg(test)]
     mod test {
@@ -154,7 +197,9 @@ pub mod query_status {
     #[allow(dead_code)]
     #[derive(Clone, Debug, Deserialize)]
     pub struct QueryStatus {
+        #[serde(rename = "code")]
         id: i32,
+        #[serde(rename = "message")]
         msg: String,
     }
 
@@ -195,18 +240,33 @@ pub mod config {
     use std::path::Path;
 
     #[derive(Clone, Debug, Deserialize)]
-    pub struct Server {
+    pub struct WebQuery {
+        server: Option<String>,
+        api_key: String,
+    }
+
+    impl WebQuery {
+        pub fn server(&self) -> String {
+            if let Some(server) = &self.server {
+                server.clone()
+            } else {
+                String::from("http://localhost:10080")
+            }
+        }
+        pub fn api_key(&self) -> &str {
+            &self.api_key
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct RawQuery {
         server: Option<String>,
         port: Option<u16>,
         user: String,
         password: String,
-        server_id: Option<i64>,
-        channel_id: i64,
-        privilege_group_id: i64,
-        redis_server: Option<String>,
     }
 
-    impl Server {
+    impl RawQuery {
         pub fn server(&self) -> String {
             if let Some(server) = &self.server {
                 server.clone()
@@ -223,6 +283,17 @@ pub mod config {
         pub fn password(&self) -> &str {
             &self.password
         }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Server {
+        server_id: Option<i64>,
+        channel_id: i64,
+        privilege_group_id: i64,
+        redis_server: Option<String>,
+    }
+
+    impl Server {
         pub fn server_id(&self) -> i64 {
             self.server_id.unwrap_or(1)
         }
@@ -256,6 +327,8 @@ pub mod config {
     pub struct Config {
         server: Server,
         misc: Misc,
+        raw_query: Option<RawQuery>,
+        web_query: Option<WebQuery>,
     }
 
     impl Config {
@@ -265,6 +338,12 @@ pub mod config {
         pub fn misc(&self) -> &Misc {
             &self.misc
         }
+        pub fn raw_query(&self) -> &Option<RawQuery> {
+            &self.raw_query
+        }
+        pub fn web_query(&self) -> &Option<WebQuery> {
+            &self.web_query
+        }
     }
 
     impl TryFrom<&Path> for Config {
@@ -273,9 +352,39 @@ pub mod config {
         fn try_from(path: &Path) -> Result<Self, Self::Error> {
             let content = read_to_string(path).map_err(|e| anyhow!("Read error: {:?}", e))?;
 
-            toml::from_str(&content).map_err(|e| anyhow!("Deserialize toml error: {:?}", e))
+            let result: Self =
+                toml::from_str(&content).map_err(|e| anyhow!("Deserialize toml error: {:?}", e))?;
+
+            if result.raw_query().is_none() && result.web_query().is_none() {
+                Err(anyhow!("Both RawQuery and WebQuery are empty, exit."))
+            } else {
+                Ok(result)
+            }
         }
     }
+}
+
+pub trait ApiMethods {
+    fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)>;
+    fn send_text_message(&mut self, clid: i64, text: &str) -> anyhow::Result<QueryStatus>;
+
+    fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)>;
+    fn create_channel(
+        &mut self,
+        name: &str,
+    ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)>;
+    fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)>;
+    fn move_client_to_channel(
+        &mut self,
+        clid: i64,
+        target_channel: i64,
+    ) -> anyhow::Result<QueryStatus>;
+    fn set_client_channel_group(
+        &mut self,
+        cldbid: i64,
+        channel_id: i64,
+        group_id: i64,
+    ) -> anyhow::Result<QueryStatus>;
 }
 
 pub use channel::Channel;
@@ -284,4 +393,5 @@ pub use config::Config;
 pub use create_channel::CreateChannel;
 pub use query_status::QueryStatus;
 use serde::Deserialize;
+use serde_json::Value;
 pub use whoami::WhoAmI;
