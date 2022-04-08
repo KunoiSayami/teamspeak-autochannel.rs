@@ -3,7 +3,6 @@ use crate::datastructures::{
 };
 use crate::ApiMethods;
 use anyhow::anyhow;
-use log::debug;
 use serde_derive::Deserialize;
 use std::time::Duration;
 
@@ -59,7 +58,7 @@ impl HttpConn {
     ) -> anyhow::Result<QueryStatus> {
         let response = self.make_request(method, payload)?;
 
-        debug!("response => {}", &response);
+        //debug!("response => {}", &response);
 
         let response: Response =
             serde_json::from_str(&response).map_err(|e| anyhow!("Got parser error: {:?}", e))?;
@@ -73,7 +72,7 @@ impl HttpConn {
     ) -> anyhow::Result<(QueryStatus, Option<Vec<T>>)> {
         let response: String = self.make_request(method, payload)?;
 
-        debug!("response => {}", &response);
+        //debug!("response => {}", &response);
 
         let response: Response = serde_json::from_str(&response)
             .map_err(|e| anyhow!("Got error while parse json: {:?}", e))?;
