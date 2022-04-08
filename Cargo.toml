@@ -12,10 +12,13 @@ clap = "3.1"
 env_logger = "0.9"
 log = "0.4"
 redis = "0.21"
-reqwest = { version = "0.11.10", features = ["blocking", "json", "serde_json"] }
+reqwest = { version = "0.11.10", features = ["blocking", "json"] }
 serde = "1.0"
 serde-teamspeak-querystring = { path = "serde-teamspeak-querystring" }
 serde_derive = "1.0"
 serde_json = "1.0.79"
 telnet = { version = "0.2.1" }
 toml = "0.5.8"
+
+[target.aarch64-unknown-linux-musl.dependencies]
+reqwest = { version = "0.11.10", features = ["blocking", "json", "rustls-tls"] }
