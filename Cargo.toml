@@ -3,7 +3,7 @@ members = [".", "serde-teamspeak-querystring"]
 
 [package]
 name = "teamspeak-autochannel"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 
 [dependencies]
@@ -21,4 +21,4 @@ telnet = { version = "0.2.1" }
 toml = "0.5.8"
 
 [target.aarch64-unknown-linux-musl.dependencies]
-reqwest = { version = "0.11.10", features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.11.10", features = ["blocking", "json", "rustls-tls"], default-features = false }
