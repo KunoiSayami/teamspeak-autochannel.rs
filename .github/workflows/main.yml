@@ -90,6 +90,7 @@ jobs:
       - name: Environment
         run: |
           git submodule update --init --recursive
+          sudo apt install libssl-dev
       - name: Build aarch 64 binary
         uses: actions-rs/cargo@v1
         with:
