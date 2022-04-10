@@ -3,7 +3,7 @@ members = [".", "serde-teamspeak-querystring"]
 
 [package]
 name = "teamspeak-autochannel"
-version = "0.7.0"
+version = "0.7.1-alpha"
 edition = "2021"
 
 [dependencies]

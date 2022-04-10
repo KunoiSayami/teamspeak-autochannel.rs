@@ -166,7 +166,7 @@ impl ApiMethods for HttpConn {
     }
 
     fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
-        self.query_operation_non_error("clientlist", &[])
+        self.query_operation_non_error("clientlist", &[("", "-uid")])
     }
 
     fn move_client_to_channel(
@@ -185,7 +185,7 @@ impl ApiMethods for HttpConn {
 
     fn set_client_channel_group(
         &mut self,
-        cldbid: i64,
+        client_database_id: i64,
         channel_id: i64,
         group_id: i64,
     ) -> anyhow::Result<QueryStatus> {
@@ -194,7 +194,7 @@ impl ApiMethods for HttpConn {
             &[
                 ("cgid", &format!("{}", group_id)),
                 ("cid", &format!("{}", channel_id)),
-                ("cldbid", &format!("{}", cldbid)),
+                ("cldbid", &format!("{}", client_database_id)),
             ],
         )
     }
@@ -217,5 +217,9 @@ mod test {
         let (status, whoami) = conn.who_am_i().unwrap();
 
         dbg!(whoami);
+
+        let (status, channels) = conn.query_channels().unwrap();
+
+        dbg(channels);
     }
 }

@@ -62,7 +62,7 @@ impl ApiMethods for TelnetConn {
 
     fn set_client_channel_group(
         &mut self,
-        cldbid: i64,
+        client_database_id: i64,
         channel_id: i64,
         group_id: i64,
     ) -> anyhow::Result<QueryStatus> {
@@ -70,7 +70,7 @@ impl ApiMethods for TelnetConn {
             "setclientchannelgroup cgid={group} cid={channel_id} cldbid={cldbid}\n\r",
             group = group_id,
             channel_id = channel_id,
-            cldbid = cldbid
+            cldbid = client_database_id
         );
         self.basic_operation(&payload)
     }

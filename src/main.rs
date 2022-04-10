@@ -156,6 +156,22 @@ fn staff(
                 ret.unwrap()
             };
 
+            let (status, channels) = conn.query_channels()?;
+
+            if status.is_err() {
+                error!("Got error while channellist: {:?}", status);
+                continue;
+            }
+
+            if !channels
+                .iter()
+                .any(|c| target_channel == c.cid() && c.pid() == client.channel_id())
+            {
+                redis_conn.del(&key)?;
+                skip_sleep = true;
+                continue;
+            }
+
             let status = match conn.move_client_to_channel(client.client_id(), target_channel) {
                 Ok(ret) => ret,
                 Err(e) => {

@@ -424,7 +424,7 @@ pub trait ApiMethods {
     ) -> anyhow::Result<QueryStatus>;
     fn set_client_channel_group(
         &mut self,
-        cldbid: i64,
+        client_database_id: i64,
         channel_id: i64,
         group_id: i64,
     ) -> anyhow::Result<QueryStatus>;
