@@ -15,17 +15,15 @@ pub struct Response {
 pub struct HttpConn {
     url: String,
     api_key: String,
-    pid: String,
     sid: i64,
     client: reqwest::blocking::Client,
 }
 
 impl HttpConn {
-    pub fn new(server: String, api_key: String, pid: i64, sid: i64) -> anyhow::Result<Self> {
+    pub fn new(server: String, api_key: String, sid: i64) -> anyhow::Result<Self> {
         Ok(Self {
             url: server,
             api_key,
-            pid: format!("{}", pid),
             sid,
             client: reqwest::blocking::ClientBuilder::new()
                 .timeout(Duration::from_secs(10))
@@ -155,12 +153,13 @@ impl ApiMethods for HttpConn {
     fn create_channel(
         &mut self,
         name: &str,
+        pid: i64,
     ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)> {
         self.query_operation_1(
             "channelcreate",
             &[
                 ("channel_name", name),
-                ("cpid", &self.pid),
+                ("cpid", &format!("{}", pid)),
                 ("channel_codec_quality", "6"),
             ],
         )
@@ -211,7 +210,6 @@ mod test {
         let mut conn = HttpConn::new(
             "http://localhost:10080/".to_string(),
             env!("QUERY_API_KEY").to_string(),
-            30,
             1,
         )
         .unwrap();

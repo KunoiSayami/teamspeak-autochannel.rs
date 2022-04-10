@@ -7,7 +7,6 @@ use telnet::Event;
 
 pub struct TelnetConn {
     conn: telnet::Telnet,
-    pid: i64,
 }
 
 impl ApiMethods for TelnetConn {
@@ -33,11 +32,12 @@ impl ApiMethods for TelnetConn {
     fn create_channel(
         &mut self,
         name: &str,
+        pid: i64,
     ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)> {
         let payload = format!(
             "channelcreate channel_name={name} cpid={pid} channel_codec_quality=6\n\r",
             name = Self::escape(name),
-            pid = self.pid
+            pid = pid
         );
         let (status, ret) = self.query_operation(payload.as_str())?;
         Ok((status, ret.map(|mut v| v.remove(0))))
@@ -188,13 +188,10 @@ impl TelnetConn {
             .replace(' ', "\\s")
             .replace('/', "\\/")
     }
-    pub fn connect(server: &str, port: u16, target_id: i64) -> anyhow::Result<Self> {
+    pub fn connect(server: &str, port: u16) -> anyhow::Result<Self> {
         let conn = telnet::Telnet::connect((server, port), 65536)
             .map_err(|e| anyhow!("Got error while connect to {}:{} {:?}", server, port, e))?;
-        let mut self_ = Self {
-            conn,
-            pid: target_id,
-        };
+        let mut self_ = Self { conn };
 
         let content = self_
             .read_data(1)

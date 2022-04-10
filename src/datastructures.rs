@@ -259,6 +259,24 @@ pub mod config {
     use std::path::Path;
 
     #[derive(Clone, Debug, Deserialize)]
+    #[serde(untagged)]
+    pub enum Channels {
+        Single(i64),
+        Multiple(Vec<i64>),
+    }
+
+    impl Channels {
+        fn to_vec(&self) -> Vec<i64> {
+            match self {
+                Channels::Single(id) => {
+                    vec![*id]
+                }
+                Channels::Multiple(ids) => ids.clone(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
     pub struct WebQuery {
         server: Option<String>,
         api_key: String,
@@ -307,7 +325,7 @@ pub mod config {
     #[derive(Clone, Debug, Deserialize)]
     pub struct Server {
         server_id: Option<i64>,
-        channel_id: i64,
+        channel_id: Channels,
         privilege_group_id: i64,
         redis_server: Option<String>,
     }
@@ -316,8 +334,13 @@ pub mod config {
         pub fn server_id(&self) -> i64 {
             self.server_id.unwrap_or(1)
         }
-        pub fn channel_id(&self) -> i64 {
-            self.channel_id
+        #[deprecated(since = "0.7.0", note = "Use channels() instead of this function")]
+        #[allow(dead_code)]
+        pub fn channel_id(&self) -> Vec<i64> {
+            self.channels()
+        }
+        pub fn channels(&self) -> Vec<i64> {
+            self.channel_id.to_vec()
         }
         pub fn privilege_group_id(&self) -> i64 {
             self.privilege_group_id
@@ -391,6 +414,7 @@ pub trait ApiMethods {
     fn create_channel(
         &mut self,
         name: &str,
+        pid: i64,
     ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)>;
     fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)>;
     fn move_client_to_channel(

@@ -17,11 +17,7 @@ enum ConnectMethod {
     Http(String, String),
 }
 
-fn bootstrap_connection(
-    config: &Config,
-    target_id: i64,
-    sid: i64,
-) -> anyhow::Result<Box<dyn ApiMethods>> {
+fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
     if let Some(cfg) = config.raw_query() {
         init_connection(
             ConnectMethod::Telnet(
@@ -30,27 +26,21 @@ fn bootstrap_connection(
                 cfg.user().to_string(),
                 cfg.password().to_string(),
             ),
-            target_id,
             sid,
         )
     } else {
         let cfg = config.web_query().as_ref().unwrap();
         init_connection(
             ConnectMethod::Http(cfg.server(), cfg.api_key().to_string()),
-            target_id,
             sid,
         )
     }
 }
 
-fn init_connection(
-    method: ConnectMethod,
-    target_id: i64,
-    sid: i64,
-) -> anyhow::Result<Box<dyn ApiMethods>> {
+fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
     match method {
         ConnectMethod::Telnet(server, port, user, password) => {
-            let mut conn = TelnetConn::connect(&server, port, target_id)?;
+            let mut conn = TelnetConn::connect(&server, port)?;
             let status = conn.login(&user, &password)?;
 
             if status.is_err() {
@@ -64,7 +54,7 @@ fn init_connection(
             Ok(Box::new(conn))
         }
         ConnectMethod::Http(server, api_key) => {
-            let mut conn = HttpConn::new(server, api_key, target_id, sid)?;
+            let mut conn = HttpConn::new(server, api_key, sid)?;
 
             let status = conn.who_am_i()?.0;
 
@@ -78,7 +68,7 @@ fn init_connection(
 
 fn staff(
     mut conn: Box<dyn ApiMethods>,
-    channel_id: i64,
+    monitor_channels: Vec<i64>,
     privilege_group: i64,
     redis_server: String,
     interval: u64,
@@ -113,8 +103,8 @@ fn staff(
         }
 
         'outer: for client in clients {
-            if client.channel_id() != channel_id
-                || client.client_database_id() == who_am_i.cldbid()
+            if client.client_database_id() == who_am_i.cldbid()
+                || !monitor_channels.iter().any(|v| *v == client.channel_id())
                 || client.client_type() == 1
             {
                 continue;
@@ -130,13 +120,14 @@ fn staff(
 
                 let mut name = format!("{}'s channel", client.client_nickname());
                 let channel_id = loop {
-                    let (status, create_channel) = match conn.create_channel(&name) {
-                        Ok(ret) => ret,
-                        Err(e) => {
-                            error!("Got error while create channel: {:?}", e);
-                            continue;
-                        }
-                    };
+                    let (status, create_channel) =
+                        match conn.create_channel(&name, client.channel_id()) {
+                            Ok(ret) => ret,
+                            Err(e) => {
+                                error!("Got error while create channel: {:?}", e);
+                                continue;
+                            }
+                        };
 
                     if status.is_err() {
                         if status.id() == 771 {
@@ -187,7 +178,7 @@ fn staff(
                 .ok();
 
             if create_new {
-                conn.move_client_to_channel(who_am_i.clid(), channel_id)
+                conn.move_client_to_channel(who_am_i.clid(), client.channel_id())
                     .unwrap();
                 //mapper.insert(client.client_database_id(), target_channel);
                 redis_conn.set(&key, target_channel)?;
@@ -201,12 +192,8 @@ fn staff(
 fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
     let config = Config::try_from(path.as_ref())?;
     staff(
-        bootstrap_connection(
-            &config,
-            config.server().channel_id(),
-            config.server().server_id(),
-        )?,
-        config.server().channel_id(),
+        bootstrap_connection(&config, config.server().server_id())?,
+        config.server().channels(),
         config.server().privilege_group_id(),
         config.server().redis_server(),
         config.misc().interval(),
