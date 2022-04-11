@@ -252,6 +252,25 @@ pub mod query_status {
     }
 }
 
+pub mod server_info {
+    use super::{FromJSON, FromQueryString};
+    use serde_derive::Deserialize;
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct ServerInfo {
+        virtualserver_unique_identifier: String,
+    }
+
+    impl ServerInfo {
+        pub fn virtualserver_unique_identifier(&self) -> &str {
+            &self.virtualserver_unique_identifier
+        }
+    }
+
+    impl FromQueryString for ServerInfo {}
+    impl FromJSON for ServerInfo {}
+}
+
 pub mod config {
     use anyhow::anyhow;
     use serde_derive::Deserialize;
@@ -409,7 +428,7 @@ pub mod config {
 pub trait ApiMethods {
     fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)>;
     fn send_text_message(&mut self, clid: i64, text: &str) -> anyhow::Result<QueryStatus>;
-
+    fn query_server_info(&mut self) -> anyhow::Result<(QueryStatus, ServerInfo)>;
     fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)>;
     fn create_channel(
         &mut self,
@@ -437,4 +456,5 @@ pub use create_channel::CreateChannel;
 pub use query_status::{QueryStatus, WebQueryStatus};
 use serde::Deserialize;
 use serde_json::Value;
+pub use server_info::ServerInfo;
 pub use whoami::WhoAmI;

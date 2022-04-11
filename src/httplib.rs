@@ -1,5 +1,5 @@
 use crate::datastructures::{
-    Channel, Client, CreateChannel, FromJSON, QueryStatus, WebQueryStatus, WhoAmI,
+    Channel, Client, CreateChannel, FromJSON, QueryStatus, ServerInfo, WebQueryStatus, WhoAmI,
 };
 use crate::ApiMethods;
 use anyhow::anyhow;
@@ -146,6 +146,10 @@ impl ApiMethods for HttpConn {
         )
     }
 
+    fn query_server_info(&mut self) -> anyhow::Result<(QueryStatus, ServerInfo)> {
+        self.query_operation_1_non_error("serverinfo", &[])
+    }
+
     fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)> {
         self.query_operation_non_error("channellist", &[])
     }
@@ -166,7 +170,7 @@ impl ApiMethods for HttpConn {
     }
 
     fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
-        self.query_operation_non_error("clientlist", &[("", "-uid")])
+        self.query_operation_non_error("clientlist", &[])
     }
 
     fn move_client_to_channel(

@@ -1,4 +1,4 @@
-use crate::datastructures::{ApiMethods, Channel, Client, CreateChannel, WhoAmI};
+use crate::datastructures::{ApiMethods, Channel, Client, CreateChannel, ServerInfo, WhoAmI};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use log::{error, warn};
@@ -22,6 +22,11 @@ impl ApiMethods for TelnetConn {
             text = Self::escape(text)
         );
         self.basic_operation(&payload)
+    }
+
+    fn query_server_info(&mut self) -> anyhow::Result<(QueryStatus, ServerInfo)> {
+        let (status, mut ret) = self.query_operation_non_error("serverinfo\n\r")?;
+        Ok((status, ret.remove(0)))
     }
 
     #[allow(dead_code)]

@@ -86,6 +86,11 @@ fn staff(
         return Err(anyhow!("Whoami failed: {:?}", status));
     }
 
+    let (status, server_info) = conn.query_server_info()?;
+    if status.is_err() {
+        return Err(anyhow!("Query server info error: {:?}", status));
+    }
+
     info!("Connected: {}", who_am_i.clid());
 
     let mut skip_sleep = false;
@@ -109,7 +114,12 @@ fn staff(
             {
                 continue;
             }
-            let key = format!("ts_autochannel_{}", client.client_database_id());
+            let key = format!(
+                "ts_autochannel_{}_{server_id}_{pid}",
+                client.client_database_id(),
+                server_id = server_info.virtualserver_unique_identifier(),
+                pid = client.channel_id()
+            );
 
             let ret: Option<i64> = redis_conn.get(&key)?;
             let create_new = ret.is_none();
