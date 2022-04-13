@@ -1,15 +1,17 @@
 use crate::datastructures::{ApiMethods, Channel, Client, CreateChannel, ServerInfo, WhoAmI};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
-use log::{error, warn};
+use log::{debug, error, warn};
+use std::io;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::time::Duration;
-use telnet::Event;
 
-pub struct TelnetConn {
-    conn: telnet::Telnet,
+pub struct SocketConn {
+    conn: TcpStream,
 }
 
-impl ApiMethods for TelnetConn {
+impl ApiMethods for SocketConn {
     fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)> {
         let (status, mut ret) = self.query_operation_non_error("whoami\n\r")?;
         Ok((status, ret.remove(0)))
@@ -85,11 +87,8 @@ impl ApiMethods for TelnetConn {
     }
 }
 
-impl TelnetConn {
-    fn decode_status(data: &[u8]) -> anyhow::Result<(Option<QueryStatus>, String)> {
-        let content =
-            String::from_utf8(data.to_vec()).map_err(|e| anyhow!("Got FromUtf8Error: {:?}", e))?;
-
+impl SocketConn {
+    fn decode_status(content: String) -> anyhow::Result<(Option<QueryStatus>, String)> {
         debug_assert!(content.contains("error id="));
 
         for line in content.lines() {
@@ -103,9 +102,9 @@ impl TelnetConn {
     }
 
     fn decode_status_with_result<T: FromQueryString + Sized>(
-        data: Box<[u8]>,
+        data: String,
     ) -> anyhow::Result<(Option<QueryStatus>, Option<Vec<T>>)> {
-        let (status, content) = Self::decode_status(&data)?;
+        let (status, content) = Self::decode_status(data)?;
 
         if let Some(ref q_status) = status {
             if !q_status.is_ok() {
@@ -125,18 +124,22 @@ impl TelnetConn {
         Ok((status, None))
     }
 
-    fn read_data(&mut self, timeout: u64) -> anyhow::Result<Option<Box<[u8]>>> {
-        match self
-            .conn
-            .read_timeout(Duration::from_secs(timeout))
-            .map_err(|e| anyhow!("Got error while read data: {:?}", e))?
-        {
-            Event::Data(data) => Ok(Some(data)),
-            Event::TimedOut => Ok(None),
-            Event::NoData => Ok(None),
-            Event::Error(e) => Err(anyhow!("Got error on read data: {:?}", e)),
-            _ => Err(anyhow!("Got unknown error")),
+    fn read_data(&mut self) -> anyhow::Result<Option<String>> {
+        let mut buffer = [0u8; 512];
+        let mut ret = String::new();
+        loop {
+            let size = match self.conn.read(&mut buffer) {
+                Ok(size) => size,
+                //Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                Err(e) if e.kind().eq(&io::ErrorKind::TimedOut) => return Ok(None),
+                Err(e) => return Err(anyhow!("Got error while read data: {:?}", e)),
+            };
+            ret.push_str(&String::from_utf8_lossy(&buffer[..size]));
+            if size < 512 || (ret.contains("error id=") && ret.ends_with("\n\r")) {
+                break;
+            }
         }
+        Ok(Some(ret))
     }
 
     fn write_data(&mut self, payload: &str) -> anyhow::Result<()> {
@@ -149,18 +152,21 @@ impl TelnetConn {
                 }
             })
             .map_err(|e| anyhow!("Got error while send data: {:?}", e))?;
+        self.conn
+            .flush()
+            .map_err(|e| anyhow!("Got error while flush data: {:?}", e))?;
         Ok(())
     }
 
-    fn write_and_read(&mut self, payload: &str, timeout: u64) -> anyhow::Result<Box<[u8]>> {
+    fn write_and_read(&mut self, payload: &str) -> anyhow::Result<String> {
         self.write_data(payload)?;
-        self.read_data(timeout)?
+        self.read_data()?
             .ok_or_else(|| anyhow!("Return data is None"))
     }
 
     fn basic_operation(&mut self, payload: &str) -> anyhow::Result<QueryStatus> {
-        let data = self.write_and_read(payload, 2)?;
-        Self::decode_status(&data)?
+        let data = self.write_and_read(payload)?;
+        Self::decode_status(data)?
             .0
             .ok_or_else(|| anyhow!("Can't find status line."))
     }
@@ -169,7 +175,7 @@ impl TelnetConn {
         &mut self,
         payload: &str,
     ) -> anyhow::Result<(QueryStatus, Vec<T>)> {
-        let data = self.write_and_read(payload, 2)?;
+        let data = self.write_and_read(payload)?;
         let (status, ret) = Self::decode_status_with_result(data)?;
         Ok((
             status.ok_or_else(|| anyhow!("Can't find status line."))?,
@@ -181,7 +187,7 @@ impl TelnetConn {
         &mut self,
         payload: &str,
     ) -> anyhow::Result<(QueryStatus, Option<Vec<T>>)> {
-        let data = self.write_and_read(payload, 2)?;
+        let data = self.write_and_read(payload)?;
         let (status, ret) = Self::decode_status_with_result(data)?;
         let status = status.ok_or_else(|| anyhow!("Can't find status line."))?;
         let ret = if status.is_ok() {
@@ -198,13 +204,18 @@ impl TelnetConn {
             .replace('/', "\\/")
     }
     pub fn connect(server: &str, port: u16) -> anyhow::Result<Self> {
-        let conn = telnet::Telnet::connect((server, port), 65536)
+        let conn = TcpStream::connect(format!("{}:{}", server, port))
             .map_err(|e| anyhow!("Got error while connect to {}:{} {:?}", server, port, e))?;
+        conn.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        conn.set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        //let bufreader = BufReader::new(conn);
+        //conn.set_nonblocking(true).unwrap();
         let mut self_ = Self { conn };
 
         let content = self_
-            .read_data(1)
-            .map_err(|e| anyhow!("Got error while read content: {:?}", e))?;
+            .read_data()
+            .map_err(|e| anyhow!("Got error in connect while read content: {:?}", e))?;
 
         if content.is_none() {
             warn!("Read none");

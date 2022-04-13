@@ -1100,7 +1100,7 @@ dependencies = [
 
 [[package]]
 name = "teamspeak-autochannel"
-version = "0.7.2"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "clap 3.1.8",
@@ -1113,15 +1113,8 @@ dependencies = [
  "serde-teamspeak-querystring",
  "serde_derive",
  "serde_json",
- "telnet",
  "toml",
 ]
-
-[[package]]
-name = "telnet"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99f2cc260bea5219955ab4832c9600a41b87101d280939edae6dd10b3c68a4f3"
 
 [[package]]
 name = "termcolor"

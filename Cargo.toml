@@ -3,7 +3,7 @@ members = [".", "serde-teamspeak-querystring"]
 
 [package]
 name = "teamspeak-autochannel"
-version = "0.7.2"
+version = "0.8.0"
 edition = "2021"
 
 [dependencies]
@@ -18,7 +18,6 @@ serde = "1.0"
 serde-teamspeak-querystring = { path = "serde-teamspeak-querystring" }
 serde_derive = "1.0"
 serde_json = "1.0.79"
-telnet = { version = "0.2.1" }
 toml = "0.5.8"
 
 [target.aarch64-unknown-linux-musl.dependencies]

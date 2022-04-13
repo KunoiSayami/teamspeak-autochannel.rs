@@ -1,10 +1,10 @@
 mod datastructures;
 mod httplib;
-mod telnetlib;
+mod socketlib;
 
 use crate::datastructures::{ApiMethods, Config};
 use crate::httplib::HttpConn;
-use crate::telnetlib::TelnetConn;
+use crate::socketlib::SocketConn;
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{error, info};
@@ -40,7 +40,7 @@ fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn Api
 fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
     match method {
         ConnectMethod::Telnet(server, port, user, password) => {
-            let mut conn = TelnetConn::connect(&server, port)?;
+            let mut conn = SocketConn::connect(&server, port)?;
             let status = conn.login(&user, &password)?;
 
             if status.is_err() {
