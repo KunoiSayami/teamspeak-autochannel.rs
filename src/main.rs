@@ -66,12 +66,37 @@ fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn Ap
     }
 }
 
+fn observer(
+    conn: Box<dyn ApiMethods>,
+    monitor_channels: Vec<i64>,
+    privilege_group: i64,
+    redis_server: String,
+    interval: u64,
+) -> anyhow::Result<()> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+
+    ctrlc::set_handler(move || {
+        sender.send(true).expect("Send signal error.");
+        info!("Recv SIGINT, send signal to thread.");
+    })
+    .unwrap();
+    staff(
+        conn,
+        monitor_channels,
+        privilege_group,
+        redis_server,
+        interval,
+        receiver,
+    )
+}
+
 fn staff(
     mut conn: Box<dyn ApiMethods>,
     monitor_channels: Vec<i64>,
     privilege_group: i64,
     redis_server: String,
     interval: u64,
+    receiver: std::sync::mpsc::Receiver<bool>,
 ) -> anyhow::Result<()> {
     info!("Interval is: {}", interval);
 
@@ -96,7 +121,11 @@ fn staff(
     let mut skip_sleep = false;
     loop {
         if !skip_sleep {
-            std::thread::sleep(Duration::from_millis(interval));
+            //std::thread::sleep(Duration::from_millis(interval));
+            if let Ok(_) = receiver.recv_timeout(Duration::from_millis(interval)) {
+                info!("Exit!");
+                break;
+            }
         } else {
             skip_sleep = false;
         }
@@ -213,11 +242,13 @@ fn staff(
             info!("Move {} to {}", client.client_nickname(), target_channel);
         }
     }
+    conn.logout()?;
+    Ok(())
 }
 
 fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
     let config = Config::try_from(path.as_ref())?;
-    staff(
+    observer(
         bootstrap_connection(&config, config.server().server_id())?,
         config.server().channels(),
         config.server().privilege_group_id(),

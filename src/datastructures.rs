@@ -222,6 +222,15 @@ pub mod query_status {
         msg: String,
     }
 
+    impl Default for QueryStatus {
+        fn default() -> Self {
+            Self {
+                id: 0,
+                msg: "ok".to_string(),
+            }
+        }
+    }
+
     impl QueryStatus {
         pub fn id(&self) -> i32 {
             self.id
@@ -447,6 +456,7 @@ pub trait ApiMethods {
         channel_id: i64,
         group_id: i64,
     ) -> anyhow::Result<QueryStatus>;
+    fn logout(&mut self) -> anyhow::Result<QueryStatus>;
 }
 
 pub use channel::Channel;

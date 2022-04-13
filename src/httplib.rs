@@ -202,6 +202,10 @@ impl ApiMethods for HttpConn {
             ],
         )
     }
+
+    fn logout(&mut self) -> anyhow::Result<QueryStatus> {
+        Ok(QueryStatus::default())
+    }
 }
 
 #[cfg(test)]

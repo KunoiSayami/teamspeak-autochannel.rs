@@ -79,6 +79,10 @@ impl ApiMethods for TelnetConn {
         );
         self.basic_operation(&payload)
     }
+
+    fn logout(&mut self) -> anyhow::Result<QueryStatus> {
+        self.basic_operation(&format!("quit\n\r"))
+    }
 }
 
 impl TelnetConn {
