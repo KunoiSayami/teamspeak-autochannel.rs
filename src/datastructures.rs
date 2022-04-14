@@ -434,29 +434,30 @@ pub mod config {
     }
 }
 
-pub trait ApiMethods {
-    fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)>;
-    fn send_text_message(&mut self, clid: i64, text: &str) -> anyhow::Result<QueryStatus>;
-    fn query_server_info(&mut self) -> anyhow::Result<(QueryStatus, ServerInfo)>;
-    fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)>;
-    fn create_channel(
+#[async_trait::async_trait]
+pub trait ApiMethods: Send {
+    async fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)>;
+    async fn send_text_message(&mut self, clid: i64, text: &str) -> anyhow::Result<QueryStatus>;
+    async fn query_server_info(&mut self) -> anyhow::Result<(QueryStatus, ServerInfo)>;
+    async fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)>;
+    async fn create_channel(
         &mut self,
         name: &str,
         pid: i64,
     ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)>;
-    fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)>;
-    fn move_client_to_channel(
+    async fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)>;
+    async fn move_client_to_channel(
         &mut self,
         clid: i64,
         target_channel: i64,
     ) -> anyhow::Result<QueryStatus>;
-    fn set_client_channel_group(
+    async fn set_client_channel_group(
         &mut self,
         client_database_id: i64,
         channel_id: i64,
         group_id: i64,
     ) -> anyhow::Result<QueryStatus>;
-    fn logout(&mut self) -> anyhow::Result<QueryStatus>;
+    async fn logout(&mut self) -> anyhow::Result<QueryStatus>;
 }
 
 pub use channel::Channel;

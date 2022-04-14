@@ -8,7 +8,7 @@ use crate::socketlib::SocketConn;
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{error, info};
-use redis::Commands;
+use redis::AsyncCommands;
 use std::path::Path;
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ enum ConnectMethod {
     Http(String, String),
 }
 
-fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
+async fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
     if let Some(cfg) = config.raw_query() {
         init_connection(
             ConnectMethod::Telnet(
@@ -28,26 +28,28 @@ fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn Api
             ),
             sid,
         )
+        .await
     } else {
         let cfg = config.web_query().as_ref().unwrap();
         init_connection(
             ConnectMethod::Http(cfg.server(), cfg.api_key().to_string()),
             sid,
         )
+        .await
     }
 }
 
-fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
+async fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
     match method {
         ConnectMethod::Telnet(server, port, user, password) => {
-            let mut conn = SocketConn::connect(&server, port)?;
-            let status = conn.login(&user, &password)?;
+            let mut conn = SocketConn::connect(&server, port).await?;
+            let status = conn.login(&user, &password).await?;
 
             if status.is_err() {
                 return Err(anyhow!("Login failed. {:?}", status));
             }
 
-            let status = conn.select_server(sid)?;
+            let status = conn.select_server(sid).await?;
             if status.is_err() {
                 return Err(anyhow!("Select server id failed: {:?}", status));
             }
@@ -56,7 +58,7 @@ fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn Ap
         ConnectMethod::Http(server, api_key) => {
             let mut conn = HttpConn::new(server, api_key, sid)?;
 
-            let status = conn.who_am_i()?.0;
+            let status = conn.who_am_i().await?.0;
 
             if status.is_err() {
                 return Err(anyhow!("Check login failed: {:?}", status));
@@ -66,52 +68,65 @@ fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn Ap
     }
 }
 
-fn observer(
+async fn observer(
     conn: Box<dyn ApiMethods>,
     monitor_channels: Vec<i64>,
     privilege_group: i64,
     redis_server: String,
     interval: u64,
 ) -> anyhow::Result<()> {
-    let (sender, receiver) = std::sync::mpsc::channel();
+    let (sender, receiver) = tokio::sync::oneshot::channel();
 
-    ctrlc::set_handler(move || {
-        sender.send(true).expect("Send signal error.");
-        info!("Recv SIGINT, send signal to thread.");
-    })
-    .unwrap();
-    staff(
+    let staff_handler = tokio::spawn(staff(
         conn,
         monitor_channels,
         privilege_group,
         redis_server,
         interval,
         receiver,
-    )
+    ));
+
+    tokio::select! {
+        _ = async {
+            tokio::signal::ctrl_c().await.unwrap();
+            info!("Recv SIGINT, send signal to thread.");
+            sender.send(true).unwrap();
+            tokio::signal::ctrl_c().await.unwrap();
+            error!("Force exit program.");
+            std::process::exit(137);
+        } => {
+        }
+        ret = staff_handler => {
+            ret??
+        }
+    }
+
+    Ok(())
 }
 
-fn staff(
+async fn staff(
     mut conn: Box<dyn ApiMethods>,
     monitor_channels: Vec<i64>,
     privilege_group: i64,
     redis_server: String,
     interval: u64,
-    receiver: std::sync::mpsc::Receiver<bool>,
+    mut receiver: tokio::sync::oneshot::Receiver<bool>,
 ) -> anyhow::Result<()> {
     info!("Interval is: {}", interval);
 
     let redis = redis::Client::open(redis_server)
         .map_err(|e| anyhow!("Connect redis server error! {:?}", e))?;
     let mut redis_conn = redis
-        .get_connection()
+        .get_async_connection()
+        .await
         .map_err(|e| anyhow!("Get redis connection error: {:?}", e))?;
 
-    let (status, who_am_i) = conn.who_am_i()?;
+    let (status, who_am_i) = conn.who_am_i().await?;
     if status.is_err() {
         return Err(anyhow!("Whoami failed: {:?}", status));
     }
 
-    let (status, server_info) = conn.query_server_info()?;
+    let (status, server_info) = conn.query_server_info().await?;
     if status.is_err() {
         return Err(anyhow!("Query server info error: {:?}", status));
     }
@@ -122,14 +137,16 @@ fn staff(
     loop {
         if !skip_sleep {
             //std::thread::sleep(Duration::from_millis(interval));
-            if let Ok(_) = receiver.recv_timeout(Duration::from_millis(interval)) {
+            if let Ok(_) =
+                tokio::time::timeout(Duration::from_millis(interval), &mut receiver).await
+            {
                 info!("Exit!");
                 break;
             }
         } else {
             skip_sleep = false;
         }
-        let (status, clients) = conn.query_clients()?;
+        let (status, clients) = conn.query_clients().await?;
 
         if status.is_err() {
             error!("Got error while query clients: {:?}", status);
@@ -150,17 +167,18 @@ fn staff(
                 pid = client.channel_id()
             );
 
-            let ret: Option<i64> = redis_conn.get(&key)?;
+            let ret: Option<i64> = redis_conn.get(&key).await?;
             let create_new = ret.is_none();
             let target_channel = if create_new {
                 conn.send_text_message(client.client_id(), "I can't find you channel.")
+                    .await
                     .map_err(|e| error!("Got error while send message: {:?}", e))
                     .ok();
 
                 let mut name = format!("{}'s channel", client.client_nickname());
                 let channel_id = loop {
                     let (status, create_channel) =
-                        match conn.create_channel(&name, client.channel_id()) {
+                        match conn.create_channel(&name, client.channel_id()).await {
                             Ok(ret) => ret,
                             Err(e) => {
                                 error!("Got error while create channel: {:?}", e);
@@ -178,6 +196,7 @@ fn staff(
                         continue 'outer;
                     }
                     conn.send_text_message(client.client_id(), "Your Channel has been created!")
+                        .await
                         .map_err(|e| error!("Got error while send message: {:?}", e))
                         .ok();
 
@@ -188,6 +207,7 @@ fn staff(
                     channel_id,
                     privilege_group,
                 )
+                .await
                 .map_err(|e| error!("Got error while set client channel group: {:?}", e))
                 .ok();
                 channel_id
@@ -195,7 +215,7 @@ fn staff(
                 ret.unwrap()
             };
 
-            let (status, channels) = conn.query_channels()?;
+            let (status, channels) = conn.query_channels().await?;
 
             if status.is_err() {
                 error!("Got error while channellist: {:?}", status);
@@ -206,12 +226,15 @@ fn staff(
                 .iter()
                 .any(|c| target_channel == c.cid() && c.pid() == client.channel_id())
             {
-                redis_conn.del(&key)?;
+                redis_conn.del(&key).await?;
                 skip_sleep = true;
                 continue;
             }
 
-            let status = match conn.move_client_to_channel(client.client_id(), target_channel) {
+            let status = match conn
+                .move_client_to_channel(client.client_id(), target_channel)
+                .await
+            {
                 Ok(ret) => ret,
                 Err(e) => {
                     error!("Got error while move client: {:?}", e);
@@ -221,7 +244,7 @@ fn staff(
 
             if status.is_err() {
                 if status.id() == 768 {
-                    redis_conn.del(&key)?;
+                    redis_conn.del(&key).await?;
                     skip_sleep = true;
                     continue;
                 }
@@ -229,32 +252,35 @@ fn staff(
             }
 
             conn.send_text_message(client.client_id(), "You have been moved into your channel")
+                .await
                 .map_err(|e| error!("Got error while send message: {:?}", e))
                 .ok();
 
             if create_new {
                 conn.move_client_to_channel(who_am_i.clid(), client.channel_id())
+                    .await
                     .unwrap();
                 //mapper.insert(client.client_database_id(), target_channel);
-                redis_conn.set(&key, target_channel)?;
+                redis_conn.set(&key, target_channel).await?;
             }
 
             info!("Move {} to {}", client.client_nickname(), target_channel);
         }
     }
-    conn.logout()?;
+    conn.logout().await?;
     Ok(())
 }
 
-fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
+async fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
     let config = Config::try_from(path.as_ref())?;
     observer(
-        bootstrap_connection(&config, config.server().server_id())?,
+        bootstrap_connection(&config, config.server().server_id()).await?,
         config.server().channels(),
         config.server().privilege_group_id(),
         config.server().redis_server(),
         config.misc().interval(),
     )
+    .await
 }
 
 fn main() -> anyhow::Result<()> {
@@ -264,8 +290,13 @@ fn main() -> anyhow::Result<()> {
         .get_matches();
 
     env_logger::Builder::from_default_env().init();
-
-    configure_file_bootstrap(matches.value_of("CONFIG_FILE").unwrap_or("config.toml"))?;
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(configure_file_bootstrap(
+            matches.value_of("CONFIG_FILE").unwrap_or("config.toml"),
+        ))?;
 
     Ok(())
 }

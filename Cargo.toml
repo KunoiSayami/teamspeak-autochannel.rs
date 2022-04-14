@@ -3,22 +3,24 @@ members = [".", "serde-teamspeak-querystring"]
 
 [package]
 name = "teamspeak-autochannel"
-version = "0.8.0"
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]
-ctrlc = "3.2.1"
 anyhow = "1"
+async-trait = "0.1.53"
 clap = "3.1"
+ctrlc = "3.2.1"
 env_logger = "0.9"
 log = "0.4"
-redis = "0.21"
-reqwest = { version = "0.11.10", features = ["blocking", "json"], default-features = false }
+redis = { version = "0.21", features = ["tokio-comp"] }
+reqwest = { version = "0.11.10", features = ["json"], default-features = false }
 serde = "1.0"
 serde-teamspeak-querystring = { path = "serde-teamspeak-querystring" }
 serde_derive = "1.0"
 serde_json = "1.0.79"
+tokio = { version = "1.17", features = ["full"] }
 toml = "0.5.8"
 
 [target.aarch64-unknown-linux-musl.dependencies]
-reqwest = { version = "0.11.10", features = ["blocking", "json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.11.10", features = ["json", "rustls-tls"], default-features = false }
