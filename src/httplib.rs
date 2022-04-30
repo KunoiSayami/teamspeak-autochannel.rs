@@ -33,10 +33,10 @@ impl HttpConn {
         })
     }
 
-    pub async fn make_request(
+    pub async fn make_request<T: serde::Serialize + ?Sized>(
         &self,
         method: &str,
-        payload: &[(&str, &str)],
+        payload: &T,
     ) -> anyhow::Result<String> {
         self.client
             .post(format!("{}/{}/{}", self.url, self.sid, method))
@@ -56,7 +56,11 @@ impl HttpConn {
             .map_err(|e| anyhow!("Got error while get text: {:?}", e))
     }
 
-    pub async fn basic_operation(&self, method: &str, payload: &[(&str, &str)]) -> QueryResult<()> {
+    pub async fn basic_operation<T: serde::Serialize + ?Sized>(
+        &self,
+        method: &str,
+        payload: &T,
+    ) -> QueryResult<()> {
         let response = self.make_request(method, payload).await?;
 
         //debug!("response => {}", &response);
@@ -201,6 +205,19 @@ impl ApiMethods for HttpConn {
             ],
         )
         .await
+    }
+
+    async fn add_channel_permission(
+        &mut self,
+        target_channel: i64,
+        permissions: &Vec<(u64, i64)>,
+    ) -> QueryResult<()> {
+        let mut params = vec![("cid", format!("{}", target_channel))];
+        for (k, v) in permissions {
+            params.push(("permid", format!("{}", k)));
+            params.push(("permvalue", format!("{}", v)));
+        }
+        self.basic_operation("channeladdperm", &params).await
     }
 
     async fn logout(&mut self) -> QueryResult<()> {

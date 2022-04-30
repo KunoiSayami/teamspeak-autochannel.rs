@@ -1,5 +1,3 @@
-extern crate core;
-
 mod datastructures;
 mod httplib;
 mod socketlib;
@@ -12,6 +10,7 @@ use clap::{arg, Command};
 use log::{error, info};
 use once_cell::sync::OnceCell;
 use redis::AsyncCommands;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -78,6 +77,7 @@ async fn observer(
     privilege_group: i64,
     redis_server: String,
     interval: u64,
+    channel_permissions: HashMap<i64, Vec<(u64, i64)>>,
 ) -> anyhow::Result<()> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
 
@@ -88,6 +88,7 @@ async fn observer(
         redis_server,
         interval,
         receiver,
+        channel_permissions,
     ));
 
     tokio::select! {
@@ -115,6 +116,7 @@ async fn staff(
     redis_server: String,
     interval: u64,
     mut receiver: tokio::sync::oneshot::Receiver<bool>,
+    channel_permissions: HashMap<i64, Vec<(u64, i64)>>,
 ) -> anyhow::Result<()> {
     info!("Interval is: {}", interval);
 
@@ -204,6 +206,7 @@ async fn staff(
 
                     break create_channel.unwrap().cid();
                 };
+
                 conn.set_client_channel_group(
                     client.client_database_id(),
                     channel_id,
@@ -212,6 +215,14 @@ async fn staff(
                 .await
                 .map_err(|e| error!("Got error while set client channel group: {:?}", e))
                 .ok();
+
+                if let Some(permissions) = channel_permissions.get(&client.channel_id()) {
+                    conn.add_channel_permission(client.channel_id(), permissions)
+                        .await
+                        .map_err(|e| error!("Got error while set channel permissions: {:?}", e))
+                        .ok();
+                }
+
                 channel_id
             } else {
                 ret.unwrap()
@@ -270,6 +281,7 @@ async fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()>
         config.server().privilege_group_id(),
         config.server().redis_server(),
         config.misc().interval(),
+        config.channel_permissions(),
     )
     .await
 }

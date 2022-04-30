@@ -287,8 +287,24 @@ pub mod server_info {
 pub mod config {
     use anyhow::anyhow;
     use serde_derive::Deserialize;
+    use std::collections::HashMap;
     use std::fs::read_to_string;
     use std::path::Path;
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Permission {
+        channel_id: i64,
+        map: Vec<(u64, i64)>,
+    }
+
+    impl Permission {
+        pub fn channel_id(&self) -> i64 {
+            self.channel_id
+        }
+        pub fn map(&self) -> &Vec<(u64, i64)> {
+            &self.map
+        }
+    }
 
     #[derive(Clone, Debug, Deserialize)]
     #[serde(untagged)]
@@ -381,7 +397,7 @@ pub mod config {
         }
     }
 
-    #[derive(Clone, Debug, Deserialize)]
+    #[derive(Clone, Debug, Default, Deserialize)]
     pub struct Message {
         channel_not_found: Option<String>,
         create_channel: Option<String>,
@@ -421,7 +437,8 @@ pub mod config {
     pub struct Config {
         server: Server,
         misc: Misc,
-        custom_message: Message,
+        custom_message: Option<Message>,
+        permissions: Option<Vec<Permission>>,
         raw_query: Option<RawQuery>,
         web_query: Option<WebQuery>,
     }
@@ -439,8 +456,20 @@ pub mod config {
         pub fn web_query(&self) -> &Option<WebQuery> {
             &self.web_query
         }
-        pub fn message(&self) -> &Message {
-            &self.custom_message
+        pub fn message(&self) -> Message {
+            self.custom_message.clone().unwrap_or_default()
+        }
+        pub fn channel_permissions(&self) -> HashMap<i64, Vec<(u64, i64)>> {
+            let mut m = Default::default();
+            match &self.permissions {
+                None => m,
+                Some(permissions) => {
+                    for permission in permissions {
+                        m.insert(permission.channel_id(), permission.map().clone());
+                    }
+                    m
+                }
+            }
         }
     }
 
@@ -476,6 +505,11 @@ pub trait ApiMethods: Send {
         client_database_id: i64,
         channel_id: i64,
         group_id: i64,
+    ) -> QueryResult<()>;
+    async fn add_channel_permission(
+        &mut self,
+        target_channel: i64,
+        permissions: &Vec<(u64, i64)>,
     ) -> QueryResult<()>;
     async fn logout(&mut self) -> QueryResult<()>;
 }

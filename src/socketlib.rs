@@ -79,6 +79,23 @@ impl ApiMethods for SocketConn {
         self.basic_operation(&payload).await
     }
 
+    async fn add_channel_permission(
+        &mut self,
+        target_channel: i64,
+        permissions: &Vec<(u64, i64)>,
+    ) -> QueryResult<()> {
+        let payload = format!(
+            "channeladdperm cid={} {}",
+            target_channel,
+            permissions
+                .into_iter()
+                .map(|(k, v)| format!("permid={} permvalue={}\n\r", k, v))
+                .collect::<Vec<String>>()
+                .join("|")
+        );
+        self.basic_operation(&payload).await
+    }
+
     async fn logout(&mut self) -> QueryResult<()> {
         self.basic_operation("quit\n\r").await
     }

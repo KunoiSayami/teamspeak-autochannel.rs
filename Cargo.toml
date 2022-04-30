@@ -3,7 +3,7 @@ members = [".", "serde-teamspeak-querystring"]
 
 [package]
 name = "teamspeak-autochannel"
-version = "2.1.1"
+version = "2.2.0"
 edition = "2021"
 
 [dependencies]
@@ -20,7 +20,7 @@ serde-teamspeak-querystring = { path = "serde-teamspeak-querystring" }
 serde_derive = "1.0"
 serde_json = "1.0.79"
 tokio = { version = "1.17", features = ["full"] }
-toml = "0.5.8"
+toml = "0.5"
 
 [target.aarch64-unknown-linux-musl.dependencies]
 reqwest = { version = "0.11.10", features = ["json", "rustls-tls"], default-features = false }
