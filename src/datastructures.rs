@@ -384,11 +384,29 @@ pub mod config {
     #[derive(Clone, Debug, Deserialize)]
     pub struct Misc {
         interval: Option<u64>,
+        custom_text1: Option<String>,
+        custom_text2: Option<String>,
+        custom_text3: Option<String>,
     }
 
     impl Misc {
         pub fn interval(&self) -> u64 {
             self.interval.unwrap_or(5)
+        }
+        pub fn custom_text1(&self) -> String {
+            self.custom_text1
+                .clone()
+                .unwrap_or_else(|| "I can't find you channel.".to_string())
+        }
+        pub fn custom_text2(&self) -> String {
+            self.custom_text2
+                .clone()
+                .unwrap_or_else(|| "Your Channel has been created!".to_string())
+        }
+        pub fn custom_text3(&self) -> String {
+            self.custom_text3
+                .clone()
+                .unwrap_or_else(|| "You have been moved into your channel.".to_string())
         }
     }
 

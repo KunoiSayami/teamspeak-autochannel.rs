@@ -1,3 +1,5 @@
+extern crate core;
+
 mod datastructures;
 mod httplib;
 mod socketlib;
@@ -8,9 +10,14 @@ use crate::socketlib::SocketConn;
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{error, info};
+use once_cell::sync::OnceCell;
 use redis::AsyncCommands;
 use std::path::Path;
 use std::time::Duration;
+
+static CUSTOM_TEXT1: OnceCell<String> = OnceCell::new();
+static CUSTOM_TEXT2: OnceCell<String> = OnceCell::new();
+static CUSTOM_TEXT3: OnceCell<String> = OnceCell::new();
 
 enum ConnectMethod {
     Telnet(String, u16, String, String),
@@ -170,7 +177,7 @@ async fn staff(
             let ret: Option<i64> = redis_conn.get(&key).await?;
             let create_new = ret.is_none();
             let target_channel = if create_new {
-                conn.send_text_message(client.client_id(), "I can't find you channel.")
+                conn.send_text_message(client.client_id(), CUSTOM_TEXT1.get().unwrap())
                     .await
                     .map_err(|e| error!("Got error while send message: {:?}", e))
                     .ok();
@@ -190,7 +197,7 @@ async fn staff(
                         }
                     };
 
-                    conn.send_text_message(client.client_id(), "Your Channel has been created!")
+                    conn.send_text_message(client.client_id(), CUSTOM_TEXT2.get().unwrap())
                         .await
                         .map_err(|e| error!("Got error while send message: {:?}", e))
                         .ok();
@@ -226,7 +233,7 @@ async fn staff(
                 }
             };
 
-            conn.send_text_message(client.client_id(), "You have been moved into your channel")
+            conn.send_text_message(client.client_id(), CUSTOM_TEXT3.get().unwrap())
                 .await
                 .map_err(|e| error!("Got error while send message: {:?}", e))
                 .ok();
@@ -248,6 +255,9 @@ async fn staff(
 
 async fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
     let config = Config::try_from(path.as_ref())?;
+    CUSTOM_TEXT1.set(config.misc().custom_text1()).unwrap();
+    CUSTOM_TEXT2.set(config.misc().custom_text2()).unwrap();
+    CUSTOM_TEXT3.set(config.misc().custom_text3()).unwrap();
     observer(
         bootstrap_connection(&config, config.server().server_id()).await?,
         config.server().channels(),
