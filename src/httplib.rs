@@ -1,5 +1,6 @@
 use crate::datastructures::{
-    Channel, Client, CreateChannel, FromJSON, QueryStatus, ServerInfo, WebQueryStatus, WhoAmI,
+    Channel, Client, CreateChannel, FromJSON, QueryError, QueryResult, ServerInfo, WebQueryStatus,
+    WhoAmI,
 };
 use crate::ApiMethods;
 use anyhow::anyhow;
@@ -55,25 +56,21 @@ impl HttpConn {
             .map_err(|e| anyhow!("Got error while get text: {:?}", e))
     }
 
-    pub async fn basic_operation(
-        &self,
-        method: &str,
-        payload: &[(&str, &str)],
-    ) -> anyhow::Result<QueryStatus> {
+    pub async fn basic_operation(&self, method: &str, payload: &[(&str, &str)]) -> QueryResult<()> {
         let response = self.make_request(method, payload).await?;
 
         //debug!("response => {}", &response);
 
         let response: Response =
             serde_json::from_str(&response).map_err(|e| anyhow!("Got parser error: {:?}", e))?;
-        Ok(response.status.to_status())
+        response.status.into_status().into_result(())
     }
 
     pub async fn query_operation<T: FromJSON + Sized>(
         &self,
         method: &str,
         payload: &[(&str, &str)],
-    ) -> anyhow::Result<(QueryStatus, Option<Vec<T>>)> {
+    ) -> QueryResult<Option<Vec<T>>> {
         let response: String = self.make_request(method, payload).await?;
 
         //debug!("response => {}", &response);
@@ -99,50 +96,50 @@ impl HttpConn {
                 Some(response)
             }
         };
-        Ok((status.to_status(), response))
+        status.into_status().into_result(response)
     }
 
     pub async fn query_operation_non_error<T: FromJSON + Sized>(
         &self,
         method: &str,
         payload: &[(&str, &str)],
-    ) -> anyhow::Result<(QueryStatus, Vec<T>)> {
-        let (status, response) = self.query_operation(method, payload).await?;
-        Ok((
-            status,
-            response.ok_or_else(|| anyhow!("Response is none: (method: {})", method))?,
-        ))
+    ) -> QueryResult<Vec<T>> {
+        let response = self.query_operation(method, payload).await?;
+        if response.is_none() {
+            return Err(QueryError::static_empty_response());
+        }
+        Ok(response.unwrap())
     }
 
     pub async fn query_operation_1<T: FromJSON + Sized>(
         &self,
         method: &str,
         payload: &[(&str, &str)],
-    ) -> anyhow::Result<(QueryStatus, Option<T>)> {
-        let (status, response) = self.query_operation(method, payload).await?;
-        Ok((status, response.map(|mut v| v.remove(0))))
+    ) -> QueryResult<Option<T>> {
+        Ok(self
+            .query_operation(method, payload)
+            .await?
+            .map(|mut v| v.remove(0)))
     }
 
     pub async fn query_operation_1_non_error<T: FromJSON + Sized>(
         &self,
         method: &str,
         payload: &[(&str, &str)],
-    ) -> anyhow::Result<(QueryStatus, T)> {
-        let (status, response) = self.query_operation_1(method, payload).await?;
-        Ok((
-            status,
-            response.ok_or_else(|| anyhow!("Response is none: (method: {})", method))?,
-        ))
+    ) -> QueryResult<T> {
+        self.query_operation_1(method, payload)
+            .await?
+            .ok_or_else(QueryError::static_empty_response)
     }
 }
 
 #[async_trait::async_trait]
 impl ApiMethods for HttpConn {
-    async fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)> {
+    async fn who_am_i(&mut self) -> QueryResult<WhoAmI> {
         self.query_operation_1_non_error("whoami", &[]).await
     }
 
-    async fn send_text_message(&mut self, clid: i64, text: &str) -> anyhow::Result<QueryStatus> {
+    async fn send_text_message(&mut self, clid: i64, text: &str) -> QueryResult<()> {
         self.basic_operation(
             "sendtextmessage",
             &[
@@ -154,19 +151,15 @@ impl ApiMethods for HttpConn {
         .await
     }
 
-    async fn query_server_info(&mut self) -> anyhow::Result<(QueryStatus, ServerInfo)> {
+    async fn query_server_info(&mut self) -> QueryResult<ServerInfo> {
         self.query_operation_1_non_error("serverinfo", &[]).await
     }
 
-    async fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)> {
+    async fn query_channels(&mut self) -> QueryResult<Vec<Channel>> {
         self.query_operation_non_error("channellist", &[]).await
     }
 
-    async fn create_channel(
-        &mut self,
-        name: &str,
-        pid: i64,
-    ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)> {
+    async fn create_channel(&mut self, name: &str, pid: i64) -> QueryResult<Option<CreateChannel>> {
         self.query_operation_1(
             "channelcreate",
             &[
@@ -178,15 +171,11 @@ impl ApiMethods for HttpConn {
         .await
     }
 
-    async fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
+    async fn query_clients(&mut self) -> QueryResult<Vec<Client>> {
         self.query_operation_non_error("clientlist", &[]).await
     }
 
-    async fn move_client_to_channel(
-        &mut self,
-        clid: i64,
-        target_channel: i64,
-    ) -> anyhow::Result<QueryStatus> {
+    async fn move_client_to_channel(&mut self, clid: i64, target_channel: i64) -> QueryResult<()> {
         self.basic_operation(
             "clientmove",
             &[
@@ -202,7 +191,7 @@ impl ApiMethods for HttpConn {
         client_database_id: i64,
         channel_id: i64,
         group_id: i64,
-    ) -> anyhow::Result<QueryStatus> {
+    ) -> QueryResult<()> {
         self.basic_operation(
             "setclientchannelgroup",
             &[
@@ -214,7 +203,7 @@ impl ApiMethods for HttpConn {
         .await
     }
 
-    async fn logout(&mut self) -> anyhow::Result<QueryStatus> {
-        Ok(QueryStatus::default())
+    async fn logout(&mut self) -> QueryResult<()> {
+        Ok(())
     }
 }

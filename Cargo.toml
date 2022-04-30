@@ -3,14 +3,13 @@ members = [".", "serde-teamspeak-querystring"]
 
 [package]
 name = "teamspeak-autochannel"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1.53"
 clap = "3.1"
-ctrlc = "3.2.1"
 env_logger = "0.9"
 log = "0.4"
 redis = { version = "0.21", features = ["tokio-comp"] }

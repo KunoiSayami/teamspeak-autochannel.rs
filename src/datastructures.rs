@@ -191,6 +191,7 @@ pub mod client {
 }
 
 pub mod query_status {
+    use crate::datastructures::{QueryError, QueryResult};
     use anyhow::anyhow;
     use serde_derive::Deserialize;
 
@@ -201,7 +202,7 @@ pub mod query_status {
     }
 
     impl WebQueryStatus {
-        pub fn to_status(self) -> QueryStatus {
+        pub fn into_status(self) -> QueryStatus {
             QueryStatus {
                 id: self.code,
                 msg: self.message,
@@ -211,7 +212,7 @@ pub mod query_status {
 
     impl From<WebQueryStatus> for QueryStatus {
         fn from(status: WebQueryStatus) -> Self {
-            status.to_status()
+            status.into_status()
         }
     }
 
@@ -235,16 +236,19 @@ pub mod query_status {
         pub fn id(&self) -> i32 {
             self.id
         }
-        pub fn _msg(&self) -> &str {
+        pub fn msg(&self) -> &String {
             &self.msg
         }
 
-        pub fn is_ok(&self) -> bool {
-            self.id == 0
+        pub fn into_err(self) -> QueryError {
+            QueryError::from(self)
         }
 
-        pub fn is_err(&self) -> bool {
-            self.id != 0
+        pub fn into_result<T>(self, ret: T) -> QueryResult<T> {
+            if self.id == 0 {
+                return Ok(ret);
+            }
+            Err(self.into_err())
         }
     }
 
@@ -362,11 +366,6 @@ pub mod config {
         pub fn server_id(&self) -> i64 {
             self.server_id.unwrap_or(1)
         }
-        #[deprecated(since = "0.7.0", note = "Use channels() instead of this function")]
-        #[allow(dead_code)]
-        pub fn channel_id(&self) -> Vec<i64> {
-            self.channels()
-        }
         pub fn channels(&self) -> Vec<i64> {
             self.channel_id.to_vec()
         }
@@ -436,28 +435,72 @@ pub mod config {
 
 #[async_trait::async_trait]
 pub trait ApiMethods: Send {
-    async fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)>;
-    async fn send_text_message(&mut self, clid: i64, text: &str) -> anyhow::Result<QueryStatus>;
-    async fn query_server_info(&mut self) -> anyhow::Result<(QueryStatus, ServerInfo)>;
-    async fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)>;
-    async fn create_channel(
-        &mut self,
-        name: &str,
-        pid: i64,
-    ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)>;
-    async fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)>;
-    async fn move_client_to_channel(
-        &mut self,
-        clid: i64,
-        target_channel: i64,
-    ) -> anyhow::Result<QueryStatus>;
+    async fn who_am_i(&mut self) -> QueryResult<WhoAmI>;
+    async fn send_text_message(&mut self, clid: i64, text: &str) -> QueryResult<()>;
+    async fn query_server_info(&mut self) -> QueryResult<ServerInfo>;
+    async fn query_channels(&mut self) -> QueryResult<Vec<Channel>>;
+    async fn create_channel(&mut self, name: &str, pid: i64) -> QueryResult<Option<CreateChannel>>;
+    async fn query_clients(&mut self) -> QueryResult<Vec<Client>>;
+    async fn move_client_to_channel(&mut self, clid: i64, target_channel: i64) -> QueryResult<()>;
     async fn set_client_channel_group(
         &mut self,
         client_database_id: i64,
         channel_id: i64,
         group_id: i64,
-    ) -> anyhow::Result<QueryStatus>;
-    async fn logout(&mut self) -> anyhow::Result<QueryStatus>;
+    ) -> QueryResult<()>;
+    async fn logout(&mut self) -> QueryResult<()>;
+}
+
+mod status_result {
+    use crate::datastructures::QueryStatus;
+    use anyhow::Error;
+    use std::fmt::{Display, Formatter};
+
+    pub type QueryResult<T> = std::result::Result<T, QueryError>;
+
+    #[derive(Clone, Default, Debug)]
+    pub struct QueryError {
+        code: i32,
+        message: String,
+    }
+
+    impl QueryError {
+        pub fn static_empty_response() -> Self {
+            Self {
+                code: -1,
+                message: "Expect result but none found.".to_string(),
+            }
+        }
+        pub fn code(&self) -> i32 {
+            self.code
+        }
+    }
+
+    impl Display for QueryError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}({})", self.message, self.code)
+        }
+    }
+
+    impl std::error::Error for QueryError {}
+
+    impl From<QueryStatus> for QueryError {
+        fn from(status: QueryStatus) -> Self {
+            Self {
+                code: status.id(),
+                message: status.msg().clone(),
+            }
+        }
+    }
+
+    impl From<anyhow::Error> for QueryError {
+        fn from(s: Error) -> Self {
+            Self {
+                code: -2,
+                message: s.to_string(),
+            }
+        }
+    }
 }
 
 pub use channel::Channel;
@@ -468,4 +511,5 @@ pub use query_status::{QueryStatus, WebQueryStatus};
 use serde::Deserialize;
 use serde_json::Value;
 pub use server_info::ServerInfo;
+pub use status_result::{QueryError, QueryResult};
 pub use whoami::WhoAmI;

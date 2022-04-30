@@ -43,26 +43,23 @@ async fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<
     match method {
         ConnectMethod::Telnet(server, port, user, password) => {
             let mut conn = SocketConn::connect(&server, port).await?;
-            let status = conn.login(&user, &password).await?;
+            conn.login(&user, &password)
+                .await
+                .map_err(|e| anyhow!("Login failed. {:?}", e))?;
 
-            if status.is_err() {
-                return Err(anyhow!("Login failed. {:?}", status));
-            }
+            conn.select_server(sid)
+                .await
+                .map_err(|e| anyhow!("Select server id failed: {:?}", e))?;
 
-            let status = conn.select_server(sid).await?;
-            if status.is_err() {
-                return Err(anyhow!("Select server id failed: {:?}", status));
-            }
             Ok(Box::new(conn))
         }
         ConnectMethod::Http(server, api_key) => {
             let mut conn = HttpConn::new(server, api_key, sid)?;
 
-            let status = conn.who_am_i().await?.0;
+            conn.who_am_i()
+                .await
+                .map_err(|e| anyhow!("Check login failed: {:?}", e))?;
 
-            if status.is_err() {
-                return Err(anyhow!("Check login failed: {:?}", status));
-            }
             Ok(Box::new(conn))
         }
     }
@@ -121,15 +118,15 @@ async fn staff(
         .await
         .map_err(|e| anyhow!("Get redis connection error: {:?}", e))?;
 
-    let (status, who_am_i) = conn.who_am_i().await?;
-    if status.is_err() {
-        return Err(anyhow!("Whoami failed: {:?}", status));
-    }
+    let who_am_i = conn
+        .who_am_i()
+        .await
+        .map_err(|e| anyhow!("Whoami failed: {:?}", e))?;
 
-    let (status, server_info) = conn.query_server_info().await?;
-    if status.is_err() {
-        return Err(anyhow!("Query server info error: {:?}", status));
-    }
+    let server_info = conn
+        .query_server_info()
+        .await
+        .map_err(|e| anyhow!("Query server info error: {:?}", e))?;
 
     info!("Connected: {}", who_am_i.clid());
 
@@ -137,8 +134,9 @@ async fn staff(
     loop {
         if !skip_sleep {
             //std::thread::sleep(Duration::from_millis(interval));
-            if let Ok(_) =
-                tokio::time::timeout(Duration::from_millis(interval), &mut receiver).await
+            if tokio::time::timeout(Duration::from_millis(interval), &mut receiver)
+                .await
+                .is_ok()
             {
                 info!("Exit!");
                 break;
@@ -146,12 +144,14 @@ async fn staff(
         } else {
             skip_sleep = false;
         }
-        let (status, clients) = conn.query_clients().await?;
-
-        if status.is_err() {
-            error!("Got error while query clients: {:?}", status);
-            continue;
-        }
+        let clients = match conn
+            .query_clients()
+            .await
+            .map_err(|e| error!("Got error while query clients: {:?}", e))
+        {
+            Ok(clients) => clients,
+            Err(_) => continue,
+        };
 
         'outer: for client in clients {
             if client.client_database_id() == who_am_i.cldbid()
@@ -177,24 +177,19 @@ async fn staff(
 
                 let mut name = format!("{}'s channel", client.client_nickname());
                 let channel_id = loop {
-                    let (status, create_channel) =
-                        match conn.create_channel(&name, client.channel_id()).await {
-                            Ok(ret) => ret,
-                            Err(e) => {
-                                error!("Got error while create channel: {:?}", e);
+                    let create_channel = match conn.create_channel(&name, client.channel_id()).await
+                    {
+                        Ok(ret) => ret,
+                        Err(e) => {
+                            if e.code() == 771 {
+                                name = format!("{}1", name);
                                 continue;
                             }
-                        };
-
-                    if status.is_err() {
-                        if status.id() == 771 {
-                            //let (original, _) = name.rsplit_once("'s").unwrap();
-                            name = format!("{}1", name);
-                            continue;
+                            error!("Got error while create {:?} channel: {:?}", name, e);
+                            continue 'outer;
                         }
-                        error!("Got error while create {:?} channel: {:?}", name, status);
-                        continue 'outer;
-                    }
+                    };
+
                     conn.send_text_message(client.client_id(), "Your Channel has been created!")
                         .await
                         .map_err(|e| error!("Got error while send message: {:?}", e))
@@ -215,41 +210,21 @@ async fn staff(
                 ret.unwrap()
             };
 
-            let (status, channels) = conn.query_channels().await?;
-
-            if status.is_err() {
-                error!("Got error while channellist: {:?}", status);
-                continue;
-            }
-
-            if !channels
-                .iter()
-                .any(|c| target_channel == c.cid() && c.pid() == client.channel_id())
-            {
-                redis_conn.del(&key).await?;
-                skip_sleep = true;
-                continue;
-            }
-
-            let status = match conn
+            match conn
                 .move_client_to_channel(client.client_id(), target_channel)
                 .await
             {
                 Ok(ret) => ret,
                 Err(e) => {
+                    if e.code() == 768 {
+                        redis_conn.del(&key).await?;
+                        skip_sleep = true;
+                        continue;
+                    }
                     error!("Got error while move client: {:?}", e);
                     continue;
                 }
             };
-
-            if status.is_err() {
-                if status.id() == 768 {
-                    redis_conn.del(&key).await?;
-                    skip_sleep = true;
-                    continue;
-                }
-                error!("Got error while move client: {:?}", status)
-            }
 
             conn.send_text_message(client.client_id(), "You have been moved into your channel")
                 .await

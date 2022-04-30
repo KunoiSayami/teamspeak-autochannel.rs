@@ -1,4 +1,6 @@
-use crate::datastructures::{ApiMethods, Channel, Client, CreateChannel, ServerInfo, WhoAmI};
+use crate::datastructures::{
+    ApiMethods, Channel, Client, CreateChannel, QueryResult, ServerInfo, WhoAmI,
+};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use log::{error, warn};
@@ -14,12 +16,13 @@ pub struct SocketConn {
 
 #[async_trait::async_trait]
 impl ApiMethods for SocketConn {
-    async fn who_am_i(&mut self) -> anyhow::Result<(QueryStatus, WhoAmI)> {
-        let (status, mut ret) = self.query_operation_non_error("whoami\n\r").await?;
-        Ok((status, ret.remove(0)))
+    async fn who_am_i(&mut self) -> QueryResult<WhoAmI> {
+        self.query_operation_non_error("whoami\n\r")
+            .await
+            .map(|mut v| v.remove(0))
     }
 
-    async fn send_text_message(&mut self, clid: i64, text: &str) -> anyhow::Result<QueryStatus> {
+    async fn send_text_message(&mut self, clid: i64, text: &str) -> QueryResult<()> {
         let payload = format!(
             "sendtextmessage targetmode=1 target={clid} msg={text}\n\r",
             clid = clid,
@@ -28,38 +31,31 @@ impl ApiMethods for SocketConn {
         self.basic_operation(&payload).await
     }
 
-    async fn query_server_info(&mut self) -> anyhow::Result<(QueryStatus, ServerInfo)> {
-        let (status, mut ret) = self.query_operation_non_error("serverinfo\n\r").await?;
-        Ok((status, ret.remove(0)))
+    async fn query_server_info(&mut self) -> QueryResult<ServerInfo> {
+        self.query_operation_non_error("serverinfo\n\r")
+            .await
+            .map(|mut v| v.remove(0))
     }
 
-    async fn query_channels(&mut self) -> anyhow::Result<(QueryStatus, Vec<Channel>)> {
+    async fn query_channels(&mut self) -> QueryResult<Vec<Channel>> {
         self.query_operation_non_error("channellist\n\r").await
     }
 
-    async fn create_channel(
-        &mut self,
-        name: &str,
-        pid: i64,
-    ) -> anyhow::Result<(QueryStatus, Option<CreateChannel>)> {
+    async fn create_channel(&mut self, name: &str, pid: i64) -> QueryResult<Option<CreateChannel>> {
         let payload = format!(
             "channelcreate channel_name={name} cpid={pid} channel_codec_quality=6\n\r",
             name = Self::escape(name),
             pid = pid
         );
-        let (status, ret) = self.query_operation(payload.as_str()).await?;
-        Ok((status, ret.map(|mut v| v.remove(0))))
+        let ret = self.query_operation(payload.as_str()).await?;
+        Ok(ret.map(|mut v| v.remove(0)))
     }
 
-    async fn query_clients(&mut self) -> anyhow::Result<(QueryStatus, Vec<Client>)> {
+    async fn query_clients(&mut self) -> QueryResult<Vec<Client>> {
         self.query_operation_non_error("clientlist -uid\n\r").await
     }
 
-    async fn move_client_to_channel(
-        &mut self,
-        clid: i64,
-        target_channel: i64,
-    ) -> anyhow::Result<QueryStatus> {
+    async fn move_client_to_channel(&mut self, clid: i64, target_channel: i64) -> QueryResult<()> {
         let payload = format!(
             "clientmove clid={clid} cid={cid}\n\r",
             clid = clid,
@@ -73,7 +69,7 @@ impl ApiMethods for SocketConn {
         client_database_id: i64,
         channel_id: i64,
         group_id: i64,
-    ) -> anyhow::Result<QueryStatus> {
+    ) -> QueryResult<()> {
         let payload = format!(
             "setclientchannelgroup cgid={group} cid={channel_id} cldbid={cldbid}\n\r",
             group = group_id,
@@ -83,13 +79,13 @@ impl ApiMethods for SocketConn {
         self.basic_operation(&payload).await
     }
 
-    async fn logout(&mut self) -> anyhow::Result<QueryStatus> {
-        self.basic_operation(&format!("quit\n\r")).await
+    async fn logout(&mut self) -> QueryResult<()> {
+        self.basic_operation("quit\n\r").await
     }
 }
 
 impl SocketConn {
-    fn decode_status(content: String) -> anyhow::Result<(Option<QueryStatus>, String)> {
+    fn decode_status(content: String) -> QueryResult<String> {
         debug_assert!(
             !content.contains("Welcome to the TeamSpeak 3") && content.contains("error id="),
             "Content => {:?}",
@@ -100,22 +96,16 @@ impl SocketConn {
             if line.trim().starts_with("error ") {
                 let status = QueryStatus::try_from(line)?;
 
-                return Ok((Some(status), content));
+                return status.into_result(content);
             }
         }
-        Ok((None, content))
+        panic!("Should return status in reply => {}", content)
     }
 
     fn decode_status_with_result<T: FromQueryString + Sized>(
         data: String,
-    ) -> anyhow::Result<(Option<QueryStatus>, Option<Vec<T>>)> {
-        let (status, content) = Self::decode_status(data)?;
-
-        if let Some(ref q_status) = status {
-            if !q_status.is_ok() {
-                return Ok((status, None));
-            }
-        }
+    ) -> QueryResult<Option<Vec<T>>> {
+        let content = Self::decode_status(data)?;
 
         for line in content.lines() {
             if !line.starts_with("error ") {
@@ -123,10 +113,10 @@ impl SocketConn {
                 for element in line.split('|') {
                     v.push(T::from_query(element)?);
                 }
-                return Ok((status, Some(v)));
+                return Ok(Some(v));
             }
         }
-        Ok((status, None))
+        Ok(None)
     }
 
     async fn read_data(&mut self) -> anyhow::Result<Option<String>> {
@@ -182,38 +172,29 @@ impl SocketConn {
             .ok_or_else(|| anyhow!("Return data is None"))
     }
 
-    async fn basic_operation(&mut self, payload: &str) -> anyhow::Result<QueryStatus> {
+    async fn basic_operation(&mut self, payload: &str) -> QueryResult<()> {
         let data = self.write_and_read(payload).await?;
-        Self::decode_status(data)?
-            .0
-            .ok_or_else(|| anyhow!("Can't find status line."))
+        Self::decode_status(data).map(|_| ())
     }
 
     async fn query_operation_non_error<T: FromQueryString + Sized>(
         &mut self,
         payload: &str,
-    ) -> anyhow::Result<(QueryStatus, Vec<T>)> {
+    ) -> QueryResult<Vec<T>> {
         let data = self.write_and_read(payload).await?;
-        let (status, ret) = Self::decode_status_with_result(data)?;
-        Ok((
-            status.ok_or_else(|| anyhow!("Can't find status line."))?,
-            ret.ok_or_else(|| anyhow!("Can't find result line."))?,
-        ))
+        let ret = Self::decode_status_with_result(data)?;
+        Ok(ret
+            .ok_or_else(|| panic!("Can't find result line, payload => {}", payload))
+            .unwrap())
     }
 
     async fn query_operation<T: FromQueryString + Sized>(
         &mut self,
         payload: &str,
-    ) -> anyhow::Result<(QueryStatus, Option<Vec<T>>)> {
+    ) -> QueryResult<Option<Vec<T>>> {
         let data = self.write_and_read(payload).await?;
-        let (status, ret) = Self::decode_status_with_result(data)?;
-        let status = status.ok_or_else(|| anyhow!("Can't find status line."))?;
-        let ret = if status.is_ok() {
-            Some(ret.ok_or_else(|| anyhow!("Can't find result line."))?)
-        } else {
-            ret
-        };
-        Ok((status, ret))
+        Self::decode_status_with_result(data)
+        //let status = status.ok_or_else(|| anyhow!("Can't find status line."))?;
     }
 
     fn escape(s: &str) -> String {
@@ -242,12 +223,12 @@ impl SocketConn {
         Ok(self_)
     }
 
-    pub async fn login(&mut self, user: &str, password: &str) -> anyhow::Result<QueryStatus> {
+    pub async fn login(&mut self, user: &str, password: &str) -> QueryResult<()> {
         let payload = format!("login {} {}\n\r", user, password);
         self.basic_operation(payload.as_str()).await
     }
 
-    pub async fn select_server(&mut self, server_id: i64) -> anyhow::Result<QueryStatus> {
+    pub async fn select_server(&mut self, server_id: i64) -> QueryResult<()> {
         let payload = format!("use {}\n\r", server_id);
         self.basic_operation(payload.as_str()).await
     }
