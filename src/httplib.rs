@@ -210,7 +210,7 @@ impl ApiMethods for HttpConn {
     async fn add_channel_permission(
         &mut self,
         target_channel: i64,
-        permissions: &Vec<(u64, i64)>,
+        permissions: &[(u64, i64)],
     ) -> QueryResult<()> {
         let mut params = vec![("cid", format!("{}", target_channel))];
         for (k, v) in permissions {

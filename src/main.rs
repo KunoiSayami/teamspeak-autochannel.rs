@@ -216,6 +216,11 @@ async fn staff(
                 .map_err(|e| error!("Got error while set client channel group: {:?}", e))
                 .ok();
 
+                conn.add_channel_permission(client.channel_id(), &[(133, 75)])
+                    .await
+                    .map_err(|e| error!("Got error while set channel permissions: {:?}", e))
+                    .ok();
+
                 if let Some(permissions) = channel_permissions.get(&client.channel_id()) {
                     conn.add_channel_permission(client.channel_id(), permissions)
                         .await

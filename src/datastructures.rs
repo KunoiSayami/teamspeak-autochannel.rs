@@ -509,7 +509,7 @@ pub trait ApiMethods: Send {
     async fn add_channel_permission(
         &mut self,
         target_channel: i64,
-        permissions: &Vec<(u64, i64)>,
+        permissions: &[(u64, i64)],
     ) -> QueryResult<()>;
     async fn logout(&mut self) -> QueryResult<()>;
 }
