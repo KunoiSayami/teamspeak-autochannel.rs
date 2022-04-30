@@ -6,9 +6,11 @@ privilege_group_id = 5
 
 [misc]
 # interval = 5
-# custom_text1 = "I can't find you channel."
-# custom_text2 = "Your Channel has been created!"
-# custom_text3 = "You have been moved into your channel."
+
+# [custom_message]
+# channel_not_found = "I can't find you channel."
+# create_channel = "Your Channel has been created!"
+# move_to_channel = "You have been moved into your channel."
 
 # [raw_query]
 # This section priority is higher than web_query

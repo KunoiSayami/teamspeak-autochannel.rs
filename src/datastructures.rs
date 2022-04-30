@@ -382,31 +382,38 @@ pub mod config {
     }
 
     #[derive(Clone, Debug, Deserialize)]
+    pub struct Message {
+        channel_not_found: Option<String>,
+        create_channel: Option<String>,
+        move_to_channel: Option<String>,
+    }
+
+    impl Message {
+        pub fn channel_not_found(&self) -> String {
+            self.channel_not_found
+                .clone()
+                .unwrap_or_else(|| "I can't find you channel.".to_string())
+        }
+        pub fn create_channel(&self) -> String {
+            self.create_channel
+                .clone()
+                .unwrap_or_else(|| "Your Channel has been created!".to_string())
+        }
+        pub fn move_to_channel(&self) -> String {
+            self.move_to_channel
+                .clone()
+                .unwrap_or_else(|| "You have been moved into your channel.".to_string())
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
     pub struct Misc {
         interval: Option<u64>,
-        custom_text1: Option<String>,
-        custom_text2: Option<String>,
-        custom_text3: Option<String>,
     }
 
     impl Misc {
         pub fn interval(&self) -> u64 {
             self.interval.unwrap_or(5)
-        }
-        pub fn custom_text1(&self) -> String {
-            self.custom_text1
-                .clone()
-                .unwrap_or_else(|| "I can't find you channel.".to_string())
-        }
-        pub fn custom_text2(&self) -> String {
-            self.custom_text2
-                .clone()
-                .unwrap_or_else(|| "Your Channel has been created!".to_string())
-        }
-        pub fn custom_text3(&self) -> String {
-            self.custom_text3
-                .clone()
-                .unwrap_or_else(|| "You have been moved into your channel.".to_string())
         }
     }
 
@@ -414,6 +421,7 @@ pub mod config {
     pub struct Config {
         server: Server,
         misc: Misc,
+        custom_message: Message,
         raw_query: Option<RawQuery>,
         web_query: Option<WebQuery>,
     }
@@ -430,6 +438,9 @@ pub mod config {
         }
         pub fn web_query(&self) -> &Option<WebQuery> {
             &self.web_query
+        }
+        pub fn message(&self) -> &Message {
+            &self.custom_message
         }
     }
 

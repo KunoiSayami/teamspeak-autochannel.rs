@@ -15,9 +15,9 @@ use redis::AsyncCommands;
 use std::path::Path;
 use std::time::Duration;
 
-static CUSTOM_TEXT1: OnceCell<String> = OnceCell::new();
-static CUSTOM_TEXT2: OnceCell<String> = OnceCell::new();
-static CUSTOM_TEXT3: OnceCell<String> = OnceCell::new();
+static MSG_CHANNEL_NOT_FOUND: OnceCell<String> = OnceCell::new();
+static MSG_CREATE_CHANNEL: OnceCell<String> = OnceCell::new();
+static MSG_MOVE_TO_CHANNEL: OnceCell<String> = OnceCell::new();
 
 enum ConnectMethod {
     Telnet(String, u16, String, String),
@@ -177,7 +177,7 @@ async fn staff(
             let ret: Option<i64> = redis_conn.get(&key).await?;
             let create_new = ret.is_none();
             let target_channel = if create_new {
-                conn.send_text_message(client.client_id(), CUSTOM_TEXT1.get().unwrap())
+                conn.send_text_message(client.client_id(), MSG_CHANNEL_NOT_FOUND.get().unwrap())
                     .await
                     .map_err(|e| error!("Got error while send message: {:?}", e))
                     .ok();
@@ -197,7 +197,7 @@ async fn staff(
                         }
                     };
 
-                    conn.send_text_message(client.client_id(), CUSTOM_TEXT2.get().unwrap())
+                    conn.send_text_message(client.client_id(), MSG_CREATE_CHANNEL.get().unwrap())
                         .await
                         .map_err(|e| error!("Got error while send message: {:?}", e))
                         .ok();
@@ -233,7 +233,7 @@ async fn staff(
                 }
             };
 
-            conn.send_text_message(client.client_id(), CUSTOM_TEXT3.get().unwrap())
+            conn.send_text_message(client.client_id(), MSG_MOVE_TO_CHANNEL.get().unwrap())
                 .await
                 .map_err(|e| error!("Got error while send message: {:?}", e))
                 .ok();
@@ -255,9 +255,15 @@ async fn staff(
 
 async fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
     let config = Config::try_from(path.as_ref())?;
-    CUSTOM_TEXT1.set(config.misc().custom_text1()).unwrap();
-    CUSTOM_TEXT2.set(config.misc().custom_text2()).unwrap();
-    CUSTOM_TEXT3.set(config.misc().custom_text3()).unwrap();
+    MSG_CHANNEL_NOT_FOUND
+        .set(config.message().channel_not_found())
+        .unwrap();
+    MSG_CREATE_CHANNEL
+        .set(config.message().create_channel())
+        .unwrap();
+    MSG_MOVE_TO_CHANNEL
+        .set(config.message().move_to_channel())
+        .unwrap();
     observer(
         bootstrap_connection(&config, config.server().server_id()).await?,
         config.server().channels(),
