@@ -118,7 +118,11 @@ async fn staff(
     mut receiver: tokio::sync::oneshot::Receiver<bool>,
     channel_permissions: HashMap<i64, Vec<(u64, i64)>>,
 ) -> anyhow::Result<()> {
-    info!("Interval is: {}", interval);
+    info!(
+        "Interval is: {}, version: {}",
+        interval,
+        env!("CARGO_PKG_VERSION")
+    );
 
     let redis = redis::Client::open(redis_server)
         .map_err(|e| anyhow!("Connect redis server error! {:?}", e))?;
@@ -216,13 +220,13 @@ async fn staff(
                 .map_err(|e| error!("Got error while set client channel group: {:?}", e))
                 .ok();
 
-                conn.add_channel_permission(client.channel_id(), &[(133, 75)])
+                conn.add_channel_permission(channel_id, &[(133, 75)])
                     .await
-                    .map_err(|e| error!("Got error while set channel permissions: {:?}", e))
+                    .map_err(|e| error!("Got error while set default channel permissions: {:?}", e))
                     .ok();
 
                 if let Some(permissions) = channel_permissions.get(&client.channel_id()) {
-                    conn.add_channel_permission(client.channel_id(), permissions)
+                    conn.add_channel_permission(channel_id, permissions)
                         .await
                         .map_err(|e| error!("Got error while set channel permissions: {:?}", e))
                         .ok();
