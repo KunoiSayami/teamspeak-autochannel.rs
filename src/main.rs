@@ -7,7 +7,7 @@ use crate::httplib::HttpConn;
 use crate::socketlib::SocketConn;
 use anyhow::anyhow;
 use clap::{arg, Command};
-use log::{error, info};
+use log::{debug, error, info};
 use once_cell::sync::OnceCell;
 use redis::AsyncCommands;
 use std::collections::HashMap;
@@ -25,6 +25,7 @@ enum ConnectMethod {
 
 async fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
     if let Some(cfg) = config.raw_query() {
+        debug!("Login to server using raw query method");
         init_connection(
             ConnectMethod::Telnet(
                 cfg.server(),
@@ -36,6 +37,7 @@ async fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<d
         )
         .await
     } else {
+        debug!("Login to server using web query method");
         let cfg = config.web_query().as_ref().unwrap();
         init_connection(
             ConnectMethod::Http(cfg.server(), cfg.api_key().to_string()),
@@ -261,7 +263,7 @@ async fn staff(
             if create_new {
                 conn.move_client_to_channel(who_am_i.clid(), client.channel_id())
                     .await
-                    .unwrap();
+                    .map_err(|e| anyhow!("Unable move self out of channel. {:?}", e))?;
                 //mapper.insert(client.client_database_id(), target_channel);
                 redis_conn.set(&key, target_channel).await?;
             }

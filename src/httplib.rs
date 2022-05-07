@@ -123,7 +123,7 @@ impl HttpConn {
         Ok(self
             .query_operation(method, payload)
             .await?
-            .map(|mut v| v.remove(0)))
+            .map(|mut v| v.swap_remove(0)))
     }
 
     pub async fn query_operation_1_non_error<T: FromJSON + Sized>(

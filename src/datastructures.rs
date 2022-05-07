@@ -292,35 +292,35 @@ pub mod config {
     use std::path::Path;
 
     #[derive(Clone, Debug, Deserialize)]
-    pub struct Permission {
-        channel_id: i64,
-        map: Vec<(u64, i64)>,
-    }
-
-    impl Permission {
-        pub fn channel_id(&self) -> i64 {
-            self.channel_id
-        }
-        pub fn map(&self) -> &Vec<(u64, i64)> {
-            &self.map
-        }
-    }
-
-    #[derive(Clone, Debug, Deserialize)]
     #[serde(untagged)]
-    pub enum Channels {
+    pub enum Integer {
         Single(i64),
         Multiple(Vec<i64>),
     }
 
-    impl Channels {
+    impl Integer {
         fn to_vec(&self) -> Vec<i64> {
             match self {
-                Channels::Single(id) => {
+                Integer::Single(id) => {
                     vec![*id]
                 }
-                Channels::Multiple(ids) => ids.clone(),
+                Integer::Multiple(ids) => ids.clone(),
             }
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Permission {
+        channel_id: Integer,
+        map: Vec<(u64, i64)>,
+    }
+
+    impl Permission {
+        pub fn channel_id(&self) -> &Integer {
+            &self.channel_id
+        }
+        pub fn map(&self) -> &Vec<(u64, i64)> {
+            &self.map
         }
     }
 
@@ -373,7 +373,7 @@ pub mod config {
     #[derive(Clone, Debug, Deserialize)]
     pub struct Server {
         server_id: Option<i64>,
-        channel_id: Channels,
+        channel_id: Integer,
         privilege_group_id: i64,
         redis_server: Option<String>,
     }
@@ -465,7 +465,16 @@ pub mod config {
                 None => m,
                 Some(permissions) => {
                     for permission in permissions {
-                        m.insert(permission.channel_id(), permission.map().clone());
+                        match permission.channel_id() {
+                            Integer::Single(channel_id) => {
+                                m.insert(*channel_id, permission.map().clone());
+                            }
+                            Integer::Multiple(channel_ids) => {
+                                for channel_id in channel_ids {
+                                    m.insert(*channel_id, permission.map().clone());
+                                }
+                            }
+                        }
                     }
                     m
                 }

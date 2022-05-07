@@ -47,12 +47,15 @@ impl ApiMethods for SocketConn {
             name = Self::escape(name),
             pid = pid
         );
-        let ret = self.query_operation(payload.as_str()).await?;
-        Ok(ret.map(|mut v| v.remove(0)))
+        /*let ret = self.query_operation(payload.as_str()).await?;
+        Ok(ret.map(|mut v| v.remove(0)))*/
+        self.query_operation(payload.as_str())
+            .await
+            .map(|r| r.map(|mut v| v.swap_remove(0)))
     }
 
     async fn query_clients(&mut self) -> QueryResult<Vec<Client>> {
-        self.query_operation_non_error("clientlist -uid\n\r").await
+        self.query_operation_non_error("clientlist\n\r").await
     }
 
     async fn move_client_to_channel(&mut self, clid: i64, target_channel: i64) -> QueryResult<()> {
@@ -88,7 +91,7 @@ impl ApiMethods for SocketConn {
             "channeladdperm cid={} {}",
             target_channel,
             permissions
-                .into_iter()
+                .iter()
                 .map(|(k, v)| format!("permid={} permvalue={}\n\r", k, v))
                 .collect::<Vec<String>>()
                 .join("|")
@@ -219,6 +222,7 @@ impl SocketConn {
             .replace(' ', "\\s")
             .replace('/', "\\/")
     }
+
     pub async fn connect(server: &str, port: u16) -> anyhow::Result<Self> {
         let conn = TcpStream::connect(format!("{}:{}", server, port))
             .await
