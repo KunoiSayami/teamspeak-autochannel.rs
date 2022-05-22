@@ -425,11 +425,16 @@ pub mod config {
     #[derive(Clone, Debug, Deserialize)]
     pub struct Misc {
         interval: Option<u64>,
+        systemd: Option<bool>,
     }
 
     impl Misc {
         pub fn interval(&self) -> u64 {
             self.interval.unwrap_or(5)
+        }
+
+        pub fn systemd(&self) -> bool {
+            self.systemd.unwrap_or(false)
         }
     }
 

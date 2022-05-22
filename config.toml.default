@@ -16,6 +16,7 @@ privilege_group_id = 5
 
 [misc]
 # interval = 5
+# systemd = false
 
 # [custom_message]
 # channel_not_found = "I can't find you channel."

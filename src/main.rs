@@ -7,16 +7,19 @@ use crate::httplib::HttpConn;
 use crate::socketlib::SocketConn;
 use anyhow::anyhow;
 use clap::{arg, Command};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use once_cell::sync::OnceCell;
 use redis::AsyncCommands;
 use std::collections::HashMap;
+use std::hint::unreachable_unchecked;
 use std::path::Path;
 use std::time::Duration;
 
 static MSG_CHANNEL_NOT_FOUND: OnceCell<String> = OnceCell::new();
 static MSG_CREATE_CHANNEL: OnceCell<String> = OnceCell::new();
 static MSG_MOVE_TO_CHANNEL: OnceCell<String> = OnceCell::new();
+static SYSTEMD_MODE: OnceCell<bool> = OnceCell::new();
+const SYSTEMD_MODE_RETRIE_TIMES: u32 = 3;
 
 enum ConnectMethod {
     Telnet(String, u16, String, String),
@@ -45,6 +48,29 @@ async fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<d
         )
         .await
     }
+}
+
+async fn try_boostrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
+    let retries = if *SYSTEMD_MODE.get().unwrap() {
+        debug!("Systemd mode is present, will retry if connection failed.");
+        SYSTEMD_MODE_RETRIE_TIMES
+    } else {
+        1
+    };
+    for step in 0..retries {
+        match bootstrap_connection(config, sid).await {
+            Ok(ret) => return Ok(ret),
+            Err(e) => {
+                if retries == SYSTEMD_MODE_RETRIE_TIMES && step < retries - 1 {
+                    warn!("Connect server error, will retry after 30 seconds, {}", e);
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    unsafe { unreachable_unchecked() }
 }
 
 async fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
@@ -197,7 +223,7 @@ async fn staff(
                         Ok(ret) => ret,
                         Err(e) => {
                             if e.code() == 771 {
-                                name = format!("{}1", name);
+                                name.push('1');
                                 continue;
                             }
                             error!("Got error while create {:?} channel: {:?}", name, e);
@@ -275,7 +301,10 @@ async fn staff(
     Ok(())
 }
 
-async fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
+async fn configure_file_bootstrap<P: AsRef<Path>>(
+    path: P,
+    systemd_mode: bool,
+) -> anyhow::Result<()> {
     let config = Config::try_from(path.as_ref())?;
     MSG_CHANNEL_NOT_FOUND
         .set(config.message().channel_not_found())
@@ -286,8 +315,11 @@ async fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()>
     MSG_MOVE_TO_CHANNEL
         .set(config.message().move_to_channel())
         .unwrap();
+    SYSTEMD_MODE
+        .set(config.misc().systemd() || systemd_mode)
+        .unwrap();
     observer(
-        bootstrap_connection(&config, config.server().server_id()).await?,
+        try_boostrap_connection(&config, config.server().server_id()).await?,
         config.server().channels(),
         config.server().privilege_group_id(),
         config.server().redis_server(),
@@ -300,7 +332,10 @@ async fn configure_file_bootstrap<P: AsRef<Path>>(path: P) -> anyhow::Result<()>
 fn main() -> anyhow::Result<()> {
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
-        .arg(arg!([CONFIG_FILE] "Override default configure file location"))
+        .args(&[
+            arg!([CONFIG_FILE] "Override default configure file location"),
+            arg!(--systemd "Start in systemd mode, which enable wait if connect failed"),
+        ])
         .get_matches();
 
     env_logger::Builder::from_default_env().init();
@@ -310,6 +345,7 @@ fn main() -> anyhow::Result<()> {
         .unwrap()
         .block_on(configure_file_bootstrap(
             matches.value_of("CONFIG_FILE").unwrap_or("config.toml"),
+            matches.is_present("systemd"),
         ))?;
 
     Ok(())

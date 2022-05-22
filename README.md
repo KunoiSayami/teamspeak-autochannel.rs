@@ -55,7 +55,7 @@ api_key = "BAA114514" # TeamSpeak WebQuery API Key
 | channel_id | integer | Required |The ID of the channel, which you want to add the permission to. |
 | map | array | Optional |The permission you want to set to the channel. <br>For example, `[[86, 75], [133, 60]]` means set i_channel_needed_permission_modify_power to 75 and i_channel_needed_delete_power to 60. <br>See [Permission List](https://github.com/KunoiSayami/teamspeak-autochannel.rs/wiki/Permission-List) for more information. |
 | interval | integer | Optional |The interval (milliseconds) between each check. |
-| custom_message | string | Optional |The message you want to send to the user who joins the channel. |
+| custom_message | table | Optional |The message you want to send to the user who joins the channel. |
 | channel_not_found | string | Optional |The message you want to send to the user while user's channel is not found. |
 | create_channel | string | Optional |The message you want to send to the user while user's channel is created. |
 | move_to_channel | string | Optional |The message you want to send to the user while user is moved to the their channel. |
