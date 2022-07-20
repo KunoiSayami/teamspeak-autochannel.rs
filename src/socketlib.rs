@@ -1,5 +1,5 @@
 use crate::datastructures::{
-    ApiMethods, Channel, Client, CreateChannel, QueryResult, ServerInfo, WhoAmI,
+    Channel, Client, CreateChannel, QueryError, QueryResult, ServerInfo, WhoAmI,
 };
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
@@ -12,96 +12,6 @@ const BUFFER_SIZE: usize = 512;
 
 pub struct SocketConn {
     conn: TcpStream,
-}
-
-#[async_trait::async_trait]
-impl ApiMethods for SocketConn {
-    async fn who_am_i(&mut self) -> QueryResult<WhoAmI> {
-        self.query_operation_non_error("whoami\n\r")
-            .await
-            .map(|mut v| v.remove(0))
-    }
-
-    async fn send_text_message(&mut self, clid: i64, text: &str) -> QueryResult<()> {
-        let payload = format!(
-            "sendtextmessage targetmode=1 target={clid} msg={text}\n\r",
-            clid = clid,
-            text = Self::escape(text)
-        );
-        self.basic_operation(&payload).await
-    }
-
-    async fn query_server_info(&mut self) -> QueryResult<ServerInfo> {
-        self.query_operation_non_error("serverinfo\n\r")
-            .await
-            .map(|mut v| v.remove(0))
-    }
-
-    async fn query_channels(&mut self) -> QueryResult<Vec<Channel>> {
-        self.query_operation_non_error("channellist\n\r").await
-    }
-
-    async fn create_channel(&mut self, name: &str, pid: i64) -> QueryResult<Option<CreateChannel>> {
-        let payload = format!(
-            "channelcreate channel_name={name} cpid={pid} channel_codec_quality=6\n\r",
-            name = Self::escape(name),
-            pid = pid
-        );
-        /*let ret = self.query_operation(payload.as_str()).await?;
-        Ok(ret.map(|mut v| v.remove(0)))*/
-        self.query_operation(payload.as_str())
-            .await
-            .map(|r| r.map(|mut v| v.swap_remove(0)))
-    }
-
-    async fn query_clients(&mut self) -> QueryResult<Vec<Client>> {
-        self.query_operation_non_error("clientlist\n\r").await
-    }
-
-    async fn move_client_to_channel(&mut self, clid: i64, target_channel: i64) -> QueryResult<()> {
-        let payload = format!(
-            "clientmove clid={clid} cid={cid}\n\r",
-            clid = clid,
-            cid = target_channel
-        );
-        self.basic_operation(payload.as_str()).await
-    }
-
-    async fn set_client_channel_group(
-        &mut self,
-        client_database_id: i64,
-        channel_id: i64,
-        group_id: i64,
-    ) -> QueryResult<()> {
-        let payload = format!(
-            "setclientchannelgroup cgid={group} cid={channel_id} cldbid={cldbid}\n\r",
-            group = group_id,
-            channel_id = channel_id,
-            cldbid = client_database_id
-        );
-        self.basic_operation(&payload).await
-    }
-
-    async fn add_channel_permission(
-        &mut self,
-        target_channel: i64,
-        permissions: &[(u64, i64)],
-    ) -> QueryResult<()> {
-        let payload = format!(
-            "channeladdperm cid={} {}",
-            target_channel,
-            permissions
-                .iter()
-                .map(|(k, v)| format!("permid={} permvalue={}\n\r", k, v))
-                .collect::<Vec<String>>()
-                .join("|")
-        );
-        self.basic_operation(&payload).await
-    }
-
-    async fn logout(&mut self) -> QueryResult<()> {
-        self.basic_operation("quit\n\r").await
-    }
 }
 
 impl SocketConn {
@@ -119,7 +29,7 @@ impl SocketConn {
                 return status.into_result(content);
             }
         }
-        panic!("Should return status in reply => {}", content)
+        Err(QueryError::static_empty_response())
     }
 
     fn decode_status_with_result<T: FromQueryString + Sized>(
@@ -252,5 +162,101 @@ impl SocketConn {
     pub async fn select_server(&mut self, server_id: i64) -> QueryResult<()> {
         let payload = format!("use {}\n\r", server_id);
         self.basic_operation(payload.as_str()).await
+    }
+
+    pub(crate) async fn who_am_i(&mut self) -> QueryResult<WhoAmI> {
+        self.query_operation_non_error("whoami\n\r")
+            .await
+            .map(|mut v| v.remove(0))
+    }
+
+    pub(crate) async fn send_text_message(&mut self, clid: i64, text: &str) -> QueryResult<()> {
+        let payload = format!(
+            "sendtextmessage targetmode=1 target={clid} msg={text}\n\r",
+            clid = clid,
+            text = Self::escape(text)
+        );
+        self.basic_operation(&payload).await
+    }
+
+    pub(crate) async fn query_server_info(&mut self) -> QueryResult<ServerInfo> {
+        self.query_operation_non_error("serverinfo\n\r")
+            .await
+            .map(|mut v| v.remove(0))
+    }
+
+    #[allow(dead_code)]
+    async fn query_channels(&mut self) -> QueryResult<Vec<Channel>> {
+        self.query_operation_non_error("channellist\n\r").await
+    }
+
+    pub(crate) async fn create_channel(
+        &mut self,
+        name: &str,
+        pid: i64,
+    ) -> QueryResult<Option<CreateChannel>> {
+        let payload = format!(
+            "channelcreate channel_name={name} cpid={pid} channel_codec_quality=6\n\r",
+            name = Self::escape(name),
+            pid = pid
+        );
+        /*let ret = self.query_operation(payload.as_str()).await?;
+        Ok(ret.map(|mut v| v.remove(0)))*/
+        self.query_operation(payload.as_str())
+            .await
+            .map(|r| r.map(|mut v| v.swap_remove(0)))
+    }
+
+    pub(crate) async fn query_clients(&mut self) -> QueryResult<Vec<Client>> {
+        self.query_operation_non_error("clientlist\n\r").await
+    }
+
+    pub(crate) async fn move_client_to_channel(
+        &mut self,
+        clid: i64,
+        target_channel: i64,
+    ) -> QueryResult<()> {
+        let payload = format!(
+            "clientmove clid={clid} cid={cid}\n\r",
+            clid = clid,
+            cid = target_channel
+        );
+        self.basic_operation(payload.as_str()).await
+    }
+
+    pub(crate) async fn set_client_channel_group(
+        &mut self,
+        client_database_id: i64,
+        channel_id: i64,
+        group_id: i64,
+    ) -> QueryResult<()> {
+        let payload = format!(
+            "setclientchannelgroup cgid={group} cid={channel_id} cldbid={cldbid}\n\r",
+            group = group_id,
+            channel_id = channel_id,
+            cldbid = client_database_id
+        );
+        self.basic_operation(&payload).await
+    }
+
+    pub(crate) async fn add_channel_permission(
+        &mut self,
+        target_channel: i64,
+        permissions: &[(u64, i64)],
+    ) -> QueryResult<()> {
+        let payload = format!(
+            "channeladdperm cid={} {}",
+            target_channel,
+            permissions
+                .iter()
+                .map(|(k, v)| format!("permid={} permvalue={}\n\r", k, v))
+                .collect::<Vec<String>>()
+                .join("|")
+        );
+        self.basic_operation(&payload).await
+    }
+
+    pub(crate) async fn logout(&mut self) -> QueryResult<()> {
+        self.basic_operation("quit\n\r").await
     }
 }

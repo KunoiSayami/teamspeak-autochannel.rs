@@ -1,9 +1,7 @@
 mod datastructures;
-mod httplib;
 mod socketlib;
 
-use crate::datastructures::{ApiMethods, Config};
-use crate::httplib::HttpConn;
+use crate::datastructures::Config;
 use crate::socketlib::SocketConn;
 use anyhow::anyhow;
 use clap::{arg, Command};
@@ -21,36 +19,7 @@ static MSG_MOVE_TO_CHANNEL: OnceCell<String> = OnceCell::new();
 static SYSTEMD_MODE: OnceCell<bool> = OnceCell::new();
 const SYSTEMD_MODE_RETRIE_TIMES: u32 = 3;
 
-enum ConnectMethod {
-    Telnet(String, u16, String, String),
-    Http(String, String),
-}
-
-async fn bootstrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
-    if let Some(cfg) = config.raw_query() {
-        debug!("Login to server using raw query method");
-        init_connection(
-            ConnectMethod::Telnet(
-                cfg.server(),
-                cfg.port(),
-                cfg.user().to_string(),
-                cfg.password().to_string(),
-            ),
-            sid,
-        )
-        .await
-    } else {
-        debug!("Login to server using web query method");
-        let cfg = config.web_query().as_ref().unwrap();
-        init_connection(
-            ConnectMethod::Http(cfg.server(), cfg.api_key().to_string()),
-            sid,
-        )
-        .await
-    }
-}
-
-async fn try_boostrap_connection(config: &Config, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
+async fn try_init_connection(config: &Config, sid: i64) -> anyhow::Result<SocketConn> {
     let retries = if *SYSTEMD_MODE.get().unwrap() {
         debug!("Systemd mode is present, will retry if connection failed.");
         SYSTEMD_MODE_RETRIE_TIMES
@@ -58,12 +27,12 @@ async fn try_boostrap_connection(config: &Config, sid: i64) -> anyhow::Result<Bo
         1
     };
     for step in 0..retries {
-        match bootstrap_connection(config, sid).await {
+        match init_connection(config, sid).await {
             Ok(ret) => return Ok(ret),
             Err(e) => {
                 if retries == SYSTEMD_MODE_RETRIE_TIMES && step < retries - 1 {
-                    warn!("Connect server error, will retry after 30 seconds, {}", e);
-                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    warn!("Connect server error, will retry after 10 seconds, {}", e);
+                    tokio::time::sleep(Duration::from_secs(10)).await;
                 } else {
                     return Err(e);
                 }
@@ -73,34 +42,22 @@ async fn try_boostrap_connection(config: &Config, sid: i64) -> anyhow::Result<Bo
     unsafe { unreachable_unchecked() }
 }
 
-async fn init_connection(method: ConnectMethod, sid: i64) -> anyhow::Result<Box<dyn ApiMethods>> {
-    match method {
-        ConnectMethod::Telnet(server, port, user, password) => {
-            let mut conn = SocketConn::connect(&server, port).await?;
-            conn.login(&user, &password)
-                .await
-                .map_err(|e| anyhow!("Login failed. {:?}", e))?;
+async fn init_connection(config: &Config, sid: i64) -> anyhow::Result<SocketConn> {
+    let cfg = config.raw_query();
+    let mut conn = SocketConn::connect(&cfg.server(), cfg.port()).await?;
+    conn.login(cfg.user(), &cfg.password())
+        .await
+        .map_err(|e| anyhow!("Login failed. {:?}", e))?;
 
-            conn.select_server(sid)
-                .await
-                .map_err(|e| anyhow!("Select server id failed: {:?}", e))?;
+    conn.select_server(sid)
+        .await
+        .map_err(|e| anyhow!("Select server id failed: {:?}", e))?;
 
-            Ok(Box::new(conn))
-        }
-        ConnectMethod::Http(server, api_key) => {
-            let mut conn = HttpConn::new(server, api_key, sid)?;
-
-            conn.who_am_i()
-                .await
-                .map_err(|e| anyhow!("Check login failed: {:?}", e))?;
-
-            Ok(Box::new(conn))
-        }
-    }
+    Ok(conn)
 }
 
 async fn observer(
-    conn: Box<dyn ApiMethods>,
+    conn: SocketConn,
     monitor_channels: Vec<i64>,
     privilege_group: i64,
     redis_server: String,
@@ -138,7 +95,7 @@ async fn observer(
 }
 
 async fn staff(
-    mut conn: Box<dyn ApiMethods>,
+    mut conn: SocketConn,
     monitor_channels: Vec<i64>,
     privilege_group: i64,
     redis_server: String,
@@ -319,7 +276,7 @@ async fn configure_file_bootstrap<P: AsRef<Path>>(
         .set(config.misc().systemd() || systemd_mode)
         .unwrap();
     observer(
-        try_boostrap_connection(&config, config.server().server_id()).await?,
+        try_init_connection(&config, config.server().server_id()).await?,
         config.server().channels(),
         config.server().privilege_group_id(),
         config.server().redis_server(),

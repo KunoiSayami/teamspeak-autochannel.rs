@@ -10,7 +10,10 @@ You and other users can get a temporary channel automatically when you join the 
 ## Configuration
 
 You should create a config file in the same directory as the binary file.
-   
+
+Web query removed since 3.0.0, please use latest 2.x version instead.
+
+
 ```toml
 [server]
 server_id = 1 # Server ID
@@ -33,16 +36,12 @@ interval = 5 # Interval (milliseconds)
 # move_to_channel = "You have been moved into your channel."
 
 [raw_query]
-# This section priority is higher than web_query
 server = ""  # TeamSpeak Server Address
 port = 10011 # TeamSpeak ServerQuery(Raw) Port
 user = "serveradmin" # TeamSpeak ServerQuery Username
 password = "114514" # TeamSpeak ServerQuery Password
 
-[web_query]
-# This method may significantly increase CPU usage.
-server = "https://localhost:10080" # TeamSpeak WebQuery Server Address
-api_key = "BAA114514" # TeamSpeak WebQuery API Key
+# web_query section removed since 3.0.0
 ```
 
 | Name | Type | Required |Description | 
@@ -64,6 +63,3 @@ api_key = "BAA114514" # TeamSpeak WebQuery API Key
 | port | integer | Required | TeamSpeak ServerQuery(Raw) Port |
 | user | string | Required | TeamSpeak ServerQuery Username |
 | password | string | Required | TeamSpeak ServerQuery Password |
-| web_query | table | - | TeamSpeak WebQuery<br>This method may significantly increase CPU usage. |
-| server | string | Required | TeamSpeak WebQuery Server Address |
-| api_key | string | Required |TeamSpeak WebQuery API Key |

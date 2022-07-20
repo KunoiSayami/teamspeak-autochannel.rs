@@ -325,25 +325,6 @@ pub mod config {
     }
 
     #[derive(Clone, Debug, Deserialize)]
-    pub struct WebQuery {
-        server: Option<String>,
-        api_key: String,
-    }
-
-    impl WebQuery {
-        pub fn server(&self) -> String {
-            if let Some(server) = &self.server {
-                server.clone()
-            } else {
-                String::from("http://localhost:10080")
-            }
-        }
-        pub fn api_key(&self) -> &str {
-            &self.api_key
-        }
-    }
-
-    #[derive(Clone, Debug, Deserialize)]
     pub struct RawQuery {
         server: Option<String>,
         port: Option<u16>,
@@ -444,8 +425,7 @@ pub mod config {
         misc: Misc,
         custom_message: Option<Message>,
         permissions: Option<Vec<Permission>>,
-        raw_query: Option<RawQuery>,
-        web_query: Option<WebQuery>,
+        raw_query: RawQuery,
     }
 
     impl Config {
@@ -455,11 +435,8 @@ pub mod config {
         pub fn misc(&self) -> &Misc {
             &self.misc
         }
-        pub fn raw_query(&self) -> &Option<RawQuery> {
+        pub fn raw_query(&self) -> &RawQuery {
             &self.raw_query
-        }
-        pub fn web_query(&self) -> &Option<WebQuery> {
-            &self.web_query
         }
         pub fn message(&self) -> Message {
             self.custom_message.clone().unwrap_or_default()
@@ -493,39 +470,9 @@ pub mod config {
         fn try_from(path: &Path) -> Result<Self, Self::Error> {
             let content = read_to_string(path).map_err(|e| anyhow!("Read error: {:?}", e))?;
 
-            let result: Self =
-                toml::from_str(&content).map_err(|e| anyhow!("Deserialize toml error: {:?}", e))?;
-
-            if result.raw_query().is_none() && result.web_query().is_none() {
-                Err(anyhow!("Both RawQuery and WebQuery are empty, exit."))
-            } else {
-                Ok(result)
-            }
+            toml::from_str(&content).map_err(|e| anyhow!("Deserialize toml error: {:?}", e))
         }
     }
-}
-
-#[async_trait::async_trait]
-pub trait ApiMethods: Send {
-    async fn who_am_i(&mut self) -> QueryResult<WhoAmI>;
-    async fn send_text_message(&mut self, clid: i64, text: &str) -> QueryResult<()>;
-    async fn query_server_info(&mut self) -> QueryResult<ServerInfo>;
-    async fn query_channels(&mut self) -> QueryResult<Vec<Channel>>;
-    async fn create_channel(&mut self, name: &str, pid: i64) -> QueryResult<Option<CreateChannel>>;
-    async fn query_clients(&mut self) -> QueryResult<Vec<Client>>;
-    async fn move_client_to_channel(&mut self, clid: i64, target_channel: i64) -> QueryResult<()>;
-    async fn set_client_channel_group(
-        &mut self,
-        client_database_id: i64,
-        channel_id: i64,
-        group_id: i64,
-    ) -> QueryResult<()>;
-    async fn add_channel_permission(
-        &mut self,
-        target_channel: i64,
-        permissions: &[(u64, i64)],
-    ) -> QueryResult<()>;
-    async fn logout(&mut self) -> QueryResult<()>;
 }
 
 mod status_result {
@@ -570,7 +517,7 @@ mod status_result {
         }
     }
 
-    impl From<anyhow::Error> for QueryError {
+    impl From<Error> for QueryError {
         fn from(s: Error) -> Self {
             Self {
                 code: -2,
